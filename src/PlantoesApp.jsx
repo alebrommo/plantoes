@@ -1617,7 +1617,7 @@ export default function PlantoesApp() {
                 style={styles.searchInput}
                 value={searchName}
                 onChange={(e) => setSearchName(e.target.value)}
-                placeholder="Nome do plantão ou remoção…"
+                placeholder="Nome do plantão, remoção ou empresa…"
               />
               {searchName && (
                 <button
