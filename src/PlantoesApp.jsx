@@ -1815,6 +1815,36 @@ export default function PlantoesApp() {
                 </>
               )}
             </div>
+
+            {searchResults.length > 0 && (
+              <div style={{ ...styles.summaryBar, marginTop: 12 }}>
+                <SummaryChip
+                  icon={<Circle size={14} />}
+                  label="a receber"
+                  value={searchResults
+                    .filter((r) => !r.pago)
+                    .reduce((s, r) => s + (Number(r.value) || 0), 0)}
+                  color="#8C6D1B"
+                  bg="#F6EFDD"
+                />
+                <SummaryChip
+                  icon={<CheckCircle2 size={14} />}
+                  label="pago"
+                  value={searchResults
+                    .filter((r) => r.pago)
+                    .reduce((s, r) => s + (Number(r.value) || 0), 0)}
+                  color="#206B3C"
+                  bg="#E2F2E7"
+                />
+                <SummaryChip
+                  icon={<Search size={14} />}
+                  label="total"
+                  value={searchResults.reduce((s, r) => s + (Number(r.value) || 0), 0)}
+                  color="#F7F5F0"
+                  bg="#1C2B39"
+                />
+              </div>
+            )}
         </div>
         )}
 
