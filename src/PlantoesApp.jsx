@@ -596,8 +596,8 @@ function buildPdfBlob(data) {
   return assemblePdfFromPages(buildPdfPages(data));
 }
 
-const EXPORT_COL_LABEL = { data: "Data", nome: "Nome", pago: "Pago", valor: "Valor" };
-const EXPORT_COL_ORDER = ["data", "nome", "pago", "valor"];
+const EXPORT_COL_LABEL = { data: "Data", nome: "Nome", empresa: "Empresa", pago: "Pago", valor: "Valor" };
+const EXPORT_COL_ORDER = ["data", "nome", "empresa", "pago", "valor"];
 
 function getSearchColText(e, key) {
   if (key === "data") return formatShort(e.dayKey);
@@ -606,6 +606,7 @@ function getSearchColText(e, key) {
     if (e.type === "evento") return e.local || "evento";
     return e.local || "plantão";
   }
+  if (key === "empresa") return e.type === "plantao" ? "—" : e.empresa || "—";
   if (key === "pago") return e.pago ? "Pago" : "A receber";
   if (key === "valor") return currency(e.value);
   return "";
@@ -711,6 +712,7 @@ export default function PlantoesApp() {
   const [exportCols, setExportCols] = useState({
     data: true,
     nome: true,
+    empresa: true,
     pago: true,
     valor: true,
   });
