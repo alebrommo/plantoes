@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "plantao-dev",
+      "runtimeExecutable": "C:\\Users\\alebr\\OneDrive\\Área de Trabalho\\Aplicativo - Plantão\\.claude\\dev-wrapper.cmd",
+      "runtimeArgs": [],
+      "port": 5173
+    }
+  ]
+}
