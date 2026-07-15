@@ -22,6 +22,7 @@ import {
   CalendarRange,
   Search,
   FileSpreadsheet,
+  Presentation,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -43,6 +44,18 @@ function rowToEntry(row) {
     return {
       ...base,
       local: row.local || "",
+      iH: row.i_h,
+      iM: row.i_m,
+      fH: row.f_h,
+      fM: row.f_m,
+      turno: row.turno,
+    };
+  }
+  if (row.type === "evento") {
+    return {
+      ...base,
+      local: row.local || "",
+      empresa: row.empresa || "",
       iH: row.i_h,
       iM: row.i_m,
       fH: row.f_h,
@@ -110,7 +123,8 @@ const PALETTE = [
   { id: "marrom", label: "Marrom", base: "#7A5230", bg: "#EFE3D6", text: "#5C3D22" },
 ];
 const paletteFor = (id) => PALETTE.find((p) => p.id === id) || PALETTE[0];
-const defaultColorFor = (type) => (type === "plantao" ? "teal" : "terracota");
+const defaultColorFor = (type) =>
+  type === "plantao" ? "teal" : type === "evento" ? "azul" : "terracota";
 
 function ColorScroll({ options, value, onChange }) {
   const ref = React.useRef(null);
@@ -474,9 +488,9 @@ function buildPdfPages(data) {
         pdfTextOp(PDF_MARGIN, y, 10, "F1", "Nenhum registro neste período.", PDF_GRAY)
       );
     } else {
-      const desc = e.type === "plantao" ? e.local || "" : e.empresa || "";
+      const desc = e.type === "remocao" ? e.empresa || "" : e.local || "";
       const horario =
-        e.type === "plantao" && e.iH ? `${e.iH}:${e.iM}-${e.fH}:${e.fM}` : "-";
+        e.type !== "remocao" && e.iH ? `${e.iH}:${e.iM}-${e.fH}:${e.fM}` : "-";
       page.push(pdfTextOp(PDF_COL.data, y, 9, "F1", formatShort(e.dayKey), PDF_DARK));
       page.push(
         pdfTextOp(PDF_COL.nome, y, 9, "F1", truncatePdf(desc, 28), PDF_DARK)
@@ -497,6 +511,7 @@ function buildPdfPages(data) {
   const summaryLines = [
     [`Plantões (${data.plantaoCount})`, currency(data.plantaoSum)],
     [`Remoções (${data.remocaoCount})`, currency(data.remocaoSum)],
+    [`Eventos (${data.eventoCount})`, currency(data.eventoSum)],
     ["Recebido", currency(data.paidSum)],
     ["A receber", currency(data.pendingSum)],
   ];
@@ -585,8 +600,11 @@ const EXPORT_COL_ORDER = ["data", "nome", "pago", "valor"];
 
 function getSearchColText(e, key) {
   if (key === "data") return formatShort(e.dayKey);
-  if (key === "nome")
-    return e.type === "plantao" ? e.local || "plantão" : e.empresa || "remoção";
+  if (key === "nome") {
+    if (e.type === "remocao") return e.empresa || "remoção";
+    if (e.type === "evento") return e.local || "evento";
+    return e.local || "plantão";
+  }
   if (key === "pago") return e.pago ? "Pago" : "A receber";
   if (key === "valor") return currency(e.value);
   return "";
@@ -802,6 +820,8 @@ export default function PlantoesApp() {
       plantaoCount = 0,
       remocaoSum = 0,
       remocaoCount = 0,
+      eventoSum = 0,
+      eventoCount = 0,
       paidSum = 0,
       pendingSum = 0;
     Object.entries(entries).forEach(([key, list]) => {
@@ -811,6 +831,9 @@ export default function PlantoesApp() {
         if (e.type === "plantao") {
           plantaoSum += v;
           plantaoCount += 1;
+        } else if (e.type === "evento") {
+          eventoSum += v;
+          eventoCount += 1;
         } else {
           remocaoSum += v;
           remocaoCount += 1;
@@ -824,9 +847,11 @@ export default function PlantoesApp() {
       plantaoCount,
       remocaoSum,
       remocaoCount,
+      eventoSum,
+      eventoCount,
       paidSum,
       pendingSum,
-      total: plantaoSum + remocaoSum,
+      total: plantaoSum + remocaoSum + eventoSum,
     };
   }, [entries, cursor]);
 
@@ -840,6 +865,8 @@ export default function PlantoesApp() {
         plantaoCount = 0,
         remocaoSum = 0,
         remocaoCount = 0,
+        eventoSum = 0,
+        eventoCount = 0,
         paidSum = 0,
         pendingSum = 0;
       const rows = [];
@@ -849,6 +876,9 @@ export default function PlantoesApp() {
           if (e.type === "plantao") {
             plantaoSum += v;
             plantaoCount += 1;
+          } else if (e.type === "evento") {
+            eventoSum += v;
+            eventoCount += 1;
           } else {
             remocaoSum += v;
             remocaoCount += 1;
@@ -866,9 +896,11 @@ export default function PlantoesApp() {
         plantaoCount,
         remocaoSum,
         remocaoCount,
+        eventoSum,
+        eventoCount,
         paidSum,
         pendingSum,
-        total: plantaoSum + remocaoSum,
+        total: plantaoSum + remocaoSum + eventoSum,
       };
     },
     [entries]
@@ -889,7 +921,8 @@ export default function PlantoesApp() {
           if (nameQ) {
             const haystack = normText(
               [
-                e.type === "plantao" ? e.local : e.empresa,
+                e.type === "remocao" ? e.empresa : e.local,
+                e.empresa,
                 e.paciente,
                 e.origem,
                 e.destino,
@@ -1071,22 +1104,24 @@ export default function PlantoesApp() {
     try {
       const data = computePrintData(range);
       const header = ["Data", "Tipo", "Descrição", "Horário", "Status", "Valor (R$)"];
+      const tipoLabel = { plantao: "Plantão", remocao: "Remoção", evento: "Evento" };
       const rows = data.rows.map((e) => [
         formatShort(e.dayKey),
-        e.type === "plantao" ? "Plantão" : "Remoção",
-        e.type === "plantao" ? e.local || "" : e.empresa || "",
-        e.type === "plantao" && e.iH ? `${e.iH}:${e.iM} – ${e.fH}:${e.fM}` : "",
+        tipoLabel[e.type] || e.type,
+        e.type === "remocao" ? e.empresa || "" : e.local || "",
+        e.type !== "remocao" && e.iH ? `${e.iH}:${e.iM} – ${e.fH}:${e.fM}` : "",
         e.pago ? "Pago" : "A receber",
         Number(e.value) || 0,
       ]);
       const sheetData = [
-        [`Resumo de plantões e remoções — ${formatShort(data.start)} a ${formatShort(data.end)}`],
+        [`Resumo de plantões, remoções e eventos — ${formatShort(data.start)} a ${formatShort(data.end)}`],
         [],
         header,
         ...rows,
         [],
         [`Plantões (${data.plantaoCount})`, data.plantaoSum],
         [`Remoções (${data.remocaoCount})`, data.remocaoSum],
+        [`Eventos (${data.eventoCount})`, data.eventoSum],
         ["Recebido", data.paidSum],
         ["A receber", data.pendingSum],
         ["Total do período", data.total],
@@ -1197,6 +1232,14 @@ export default function PlantoesApp() {
       showToast("Informe a empresa da remoção", "error");
       return;
     }
+    if (form.type === "evento" && !form.local.trim()) {
+      showToast("Informe o nome do evento", "error");
+      return;
+    }
+    if (form.type === "evento" && !form.empresa.trim()) {
+      showToast("Informe a empresa do evento", "error");
+      return;
+    }
 
     const record = {
       id: editingId || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -1207,6 +1250,17 @@ export default function PlantoesApp() {
       ...(form.type === "plantao"
         ? {
             local: form.local,
+            iH: form.iH,
+            iM: form.iM,
+            fH: form.fH,
+            fM: form.fM,
+            turno: `${form.iH}:${form.iM} – ${form.fH}:${form.fM}`,
+            obs: form.obs,
+          }
+        : form.type === "evento"
+        ? {
+            local: form.local,
+            empresa: form.empresa,
             iH: form.iH,
             iM: form.iM,
             fH: form.fH,
@@ -1303,7 +1357,11 @@ export default function PlantoesApp() {
   const isValid =
     form.value &&
     parseBRL(form.value) > 0 &&
-    (form.type === "plantao" ? form.local.trim() : form.empresa.trim());
+    (form.type === "plantao"
+      ? form.local.trim()
+      : form.type === "evento"
+      ? form.local.trim() && form.empresa.trim()
+      : form.empresa.trim());
 
   return (
     <>
@@ -1411,6 +1469,7 @@ export default function PlantoesApp() {
               { id: "todos", label: "todos" },
               { id: "plantao", label: "plantões" },
               { id: "remocao", label: "remoções" },
+              { id: "evento", label: "eventos" },
             ].map((t) => (
               <button
                 key={t.id}
@@ -1516,9 +1575,9 @@ export default function PlantoesApp() {
                           >
                             <td style={styles.searchTd}>{formatShort(r.dayKey)}</td>
                             <td style={styles.searchTdName}>
-                              {r.type === "plantao"
-                                ? r.local || "plantão"
-                                : r.empresa || "remoção"}
+                              {r.type === "remocao"
+                                ? r.empresa || "remoção"
+                                : r.local || (r.type === "evento" ? "evento" : "plantão")}
                             </td>
                             <td style={{ ...styles.searchTd, textAlign: "center" }}>
                               <button
@@ -1552,43 +1611,34 @@ export default function PlantoesApp() {
                     </table>
                   </div>
                   <div style={styles.searchTotalsWrap}>
-                    {searchType !== "remocao" && (
-                      <div
-                        style={{
-                          ...styles.searchTotalRow,
-                          ...styles.searchTotalPlantao,
-                          ...(searchType === "plantao"
-                            ? { borderRadius: "0 0 10px 10px" }
-                            : {}),
-                        }}
-                      >                        <span>
-                          Total plantões (
-                          {searchResults.filter((r) => r.type === "plantao").length})
-                        </span>
-                        <span>
-                          {currency(
-                            searchResults
-                              .filter((r) => r.type === "plantao")
-                              .reduce((s, r) => s + (Number(r.value) || 0), 0)
-                          )}
-                        </span>
-                      </div>
-                    )}
-                    {searchType !== "plantao" && (
-                      <div style={styles.searchTotalRow}>
-                        <span>
-                          Total remoções (
-                          {searchResults.filter((r) => r.type === "remocao").length})
-                        </span>
-                        <span>
-                          {currency(
-                            searchResults
-                              .filter((r) => r.type === "remocao")
-                              .reduce((s, r) => s + (Number(r.value) || 0), 0)
-                          )}
-                        </span>
-                      </div>
-                    )}
+                    {(() => {
+                      const totalGroups = [
+                        { id: "plantao", label: "Total plantões", style: styles.searchTotalPlantao },
+                        { id: "remocao", label: "Total remoções", style: null },
+                        { id: "evento", label: "Total eventos", style: styles.searchTotalEvento },
+                      ].filter((g) => searchType === "todos" || searchType === g.id);
+                      return totalGroups.map((g, idx) => {
+                        const items = searchResults.filter((r) => r.type === g.id);
+                        const isLast = idx === totalGroups.length - 1;
+                        return (
+                          <div
+                            key={g.id}
+                            style={{
+                              ...styles.searchTotalRow,
+                              ...(g.style || {}),
+                              ...(isLast ? { borderRadius: "0 0 10px 10px" } : {}),
+                            }}
+                          >
+                            <span>
+                              {g.label} ({items.length})
+                            </span>
+                            <span>
+                              {currency(items.reduce((s, r) => s + (Number(r.value) || 0), 0))}
+                            </span>
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 </>
               )}
@@ -1633,6 +1683,14 @@ export default function PlantoesApp() {
             value={monthTotals.remocaoSum}
             color="#B5541F"
             bg="#F5E6DC"
+          />
+          <SummaryChip
+            icon={<Presentation size={14} />}
+            label="eventos"
+            count={monthTotals.eventoCount}
+            value={monthTotals.eventoSum}
+            color="#1F4278"
+            bg="#E3EAF6"
           />
           <div style={styles.totalChip}>
             <div style={styles.totalLabel}>total do mês</div>
@@ -1749,17 +1807,19 @@ export default function PlantoesApp() {
                           ...(isDragging ? styles.entryChipDragging : {}),
                         }}
                         onClick={() => openEditModal(dayKey, e)}
-                        title={e.type === "plantao" ? e.local : e.empresa}
+                        title={e.type === "remocao" ? e.empresa : e.local}
                       >
                         {e.type === "plantao" ? (
                           <Stethoscope size={10} />
+                        ) : e.type === "evento" ? (
+                          <Presentation size={10} />
                         ) : (
                           <Truck size={10} />
                         )}
                         <span style={styles.chipText}>
-                          {e.type === "plantao"
-                            ? `${e.iH ? `${e.iH}:${e.iM} · ` : ""}${e.local || "plantão"}`
-                            : e.empresa || "remoção"}
+                          {e.type === "remocao"
+                            ? e.empresa || "remoção"
+                            : `${e.iH ? `${e.iH}:${e.iM} · ` : ""}${e.local || (e.type === "evento" ? "evento" : "plantão")}`}
                         </span>
                         {e.pago ? (
                           <CheckCircle2 size={10} style={{ flexShrink: 0 }} />
@@ -1813,6 +1873,17 @@ export default function PlantoesApp() {
               >
                 <Truck size={15} />
                 Remoção
+              </button>
+              <button
+                className="btn-lift"
+                style={{
+                  ...styles.typeBtn,
+                  ...(form.type === "evento" ? styles.typeBtnActiveEvento : {}),
+                }}
+                onClick={() => setForm((f) => ({ ...f, type: "evento" }))}
+              >
+                <Presentation size={15} />
+                Evento
               </button>
             </div>
 
@@ -1881,6 +1952,67 @@ export default function PlantoesApp() {
                       value={form.local}
                       onChange={(e) => setForm((f) => ({ ...f, local: e.target.value }))}
                       placeholder="ex: Hospital São Lucas"
+                    />
+                  </Field>
+                </>
+              ) : form.type === "evento" ? (
+                <>
+                  <div style={styles.field}>
+                    <div style={styles.fieldLabel}>
+                      <Clock size={14} />
+                      <span>Horário do evento</span>
+                    </div>
+                    <div style={styles.timeRangeRow}>
+                      <div style={styles.timeGroup}>
+                        <div style={styles.timeGroupLabel}>início</div>
+                        <div style={styles.timeColsRow}>
+                          <ScrollColumn
+                            options={HOURS}
+                            value={form.iH}
+                            onChange={(v) => setForm((f) => ({ ...f, iH: v }))}
+                          />
+                          <span style={styles.timeColon}>:</span>
+                          <ScrollColumn
+                            options={MINUTES}
+                            value={form.iM}
+                            onChange={(v) => setForm((f) => ({ ...f, iM: v }))}
+                          />
+                        </div>
+                      </div>
+                      <ArrowRight size={16} style={styles.timeArrow} />
+                      <div style={styles.timeGroup}>
+                        <div style={styles.timeGroupLabel}>fim</div>
+                        <div style={styles.timeColsRow}>
+                          <ScrollColumn
+                            options={HOURS}
+                            value={form.fH}
+                            onChange={(v) => setForm((f) => ({ ...f, fH: v }))}
+                          />
+                          <span style={styles.timeColon}>:</span>
+                          <ScrollColumn
+                            options={MINUTES}
+                            value={form.fM}
+                            onChange={(v) => setForm((f) => ({ ...f, fM: v }))}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <Field icon={<Presentation size={14} />} label="Nome do evento">
+                    <input
+                      style={styles.input}
+                      value={form.local}
+                      onChange={(e) => setForm((f) => ({ ...f, local: e.target.value }))}
+                      placeholder="ex: Congresso Brasileiro de Cardiologia"
+                    />
+                  </Field>
+                  <Field icon={<Building2 size={14} />} label="Nome da empresa">
+                    <input
+                      style={styles.input}
+                      value={form.empresa}
+                      onChange={(e) => setForm((f) => ({ ...f, empresa: e.target.value }))}
+                      placeholder="ex: Sociedade Brasileira de Cardiologia"
                     />
                   </Field>
                 </>
@@ -2122,13 +2254,13 @@ export default function PlantoesApp() {
             <tr key={e.id}>
               <td style={styles.printTd}>{formatShort(e.dayKey)}</td>
               <td style={styles.printTd}>
-                {e.type === "plantao" ? "Plantão" : "Remoção"}
+                {e.type === "plantao" ? "Plantão" : e.type === "evento" ? "Evento" : "Remoção"}
               </td>
               <td style={styles.printTd}>
-                {e.type === "plantao" ? e.local : e.empresa}
+                {e.type === "remocao" ? e.empresa : e.local}
               </td>
               <td style={styles.printTd}>
-                {e.type === "plantao" && e.iH ? `${e.iH}:${e.iM} – ${e.fH}:${e.fM}` : "—"}
+                {e.type !== "remocao" && e.iH ? `${e.iH}:${e.iM} – ${e.fH}:${e.fM}` : "—"}
               </td>
               <td style={styles.printTd}>{e.pago ? "Pago" : "A receber"}</td>
               <td style={{ ...styles.printTd, textAlign: "right" }}>
@@ -2147,6 +2279,10 @@ export default function PlantoesApp() {
         <div style={styles.printSummaryRow}>
           <span>Remoções ({printData.remocaoCount})</span>
           <span>{currency(printData.remocaoSum)}</span>
+        </div>
+        <div style={styles.printSummaryRow}>
+          <span>Eventos ({printData.eventoCount})</span>
+          <span>{currency(printData.eventoSum)}</span>
         </div>
         <div style={styles.printSummaryRow}>
           <span>Recebido</span>
@@ -2444,6 +2580,11 @@ const styles = {
   searchTotalPlantao: {
     background: "#E4F0EF",
     color: "#215454",
+    borderRadius: 0,
+  },
+  searchTotalEvento: {
+    background: "#E3EAF6",
+    color: "#1F4278",
     borderRadius: 0,
   },
   searchTotalRow: {
@@ -2879,6 +3020,7 @@ const styles = {
   },
   typeBtnActivePlantao: { background: "#2D6E6E", color: "#fff", boxShadow: "0 2px 6px rgba(45,110,110,0.35)" },
   typeBtnActiveRemocao: { background: "#B5541F", color: "#fff", boxShadow: "0 2px 6px rgba(181,84,31,0.35)" },
+  typeBtnActiveEvento: { background: "#2A5DA8", color: "#fff", boxShadow: "0 2px 6px rgba(42,93,168,0.35)" },
   formBody: { display: "flex", flexDirection: "column", gap: 12 },
   field: { display: "flex", flexDirection: "column", gap: 5 },
   fieldLabel: {
