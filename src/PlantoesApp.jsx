@@ -1896,9 +1896,6 @@ export default function PlantoesApp() {
                 value={form.color || defaultColorFor(form.type)}
                 onChange={(id) => setForm((f) => ({ ...f, color: id }))}
               />
-              <div style={styles.colorSelectedLabel}>
-                {paletteFor(form.color || defaultColorFor(form.type)).label}
-              </div>
             </div>
 
             <div style={styles.formBody}>
@@ -3080,12 +3077,6 @@ const styles = {
     border: "2px solid #1C2B39",
     boxShadow: "0 0 0 2px #FFFDF9",
     transform: "scale(1.1)",
-  },
-  colorSelectedLabel: {
-    fontSize: 11.5,
-    color: "#5B6B75",
-    textAlign: "center",
-    marginTop: 4,
   },
   toast: {
     position: "fixed",
