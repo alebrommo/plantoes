@@ -1598,6 +1598,7 @@ export default function PlantoesApp() {
                         <tr>
                           <th style={styles.searchTh}>Data</th>
                           <th style={styles.searchTh}>Nome</th>
+                          <th style={styles.searchTh}>Empresa</th>
                           <th style={{ ...styles.searchTh, textAlign: "center" }}>
                             Pago
                           </th>
@@ -1618,6 +1619,9 @@ export default function PlantoesApp() {
                               {r.type === "remocao"
                                 ? r.empresa || "remoção"
                                 : r.local || (r.type === "evento" ? "evento" : "plantão")}
+                            </td>
+                            <td style={styles.searchTdName}>
+                              {r.type === "plantao" ? "—" : r.empresa || "—"}
                             </td>
                             <td style={{ ...styles.searchTd, textAlign: "center" }}>
                               <button
