@@ -23,6 +23,7 @@ import {
   Search,
   FileSpreadsheet,
   Presentation,
+  Copy,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -719,6 +720,8 @@ export default function PlantoesApp() {
   const [activeTab, setActiveTab] = useState("calendario");
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
+  const [duplicating, setDuplicating] = useState(false);
+  const [duplicateTargetDay, setDuplicateTargetDay] = useState("");
 
   // Inject fonts once
   useEffect(() => {
@@ -1197,6 +1200,7 @@ export default function PlantoesApp() {
     setSelectedDay(dayKey);
     setEditingId(null);
     setForm(emptyForm);
+    setDuplicating(false);
     setModalOpen(true);
   };
 
@@ -1204,6 +1208,7 @@ export default function PlantoesApp() {
     setSelectedDay(dayKey);
     setEditingId(entry.id);
     setForm({ ...emptyForm, ...entry, value: String(entry.value) });
+    setDuplicating(false);
     setModalOpen(true);
   };
 
@@ -1211,6 +1216,41 @@ export default function PlantoesApp() {
     setModalOpen(false);
     setEditingId(null);
     setForm(emptyForm);
+    setDuplicating(false);
+  };
+
+  const openDuplicate = () => {
+    setDuplicateTargetDay(selectedDay);
+    setDuplicating(true);
+  };
+
+  const confirmDuplicate = async () => {
+    if (!supabaseConfigured) {
+      showToast("Supabase não configurado", "error");
+      return;
+    }
+    if (!duplicateTargetDay) {
+      showToast("Escolha uma data de destino", "error");
+      return;
+    }
+    const original = (entries[selectedDay] || []).find((e) => e.id === editingId);
+    if (!original) return;
+    const copy = { ...original, id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}` };
+
+    setEntries((prev) => {
+      const list = prev[duplicateTargetDay] ? [...prev[duplicateTargetDay]] : [];
+      return { ...prev, [duplicateTargetDay]: [...list, copy] };
+    });
+    const targetDay = duplicateTargetDay;
+    closeModal();
+
+    const { error } = await supabase.from(TABLE).insert(entryToRow(targetDay, copy));
+    if (error) {
+      setSaveError(true);
+      showToast("Não foi possível duplicar", "error");
+    } else {
+      showToast(`Duplicado para ${formatShort(targetDay)}`, "success");
+    }
   };
 
   const handleSave = async () => {
@@ -2087,25 +2127,53 @@ export default function PlantoesApp() {
               </Field>
             </div>
 
-            <div style={styles.modalFooter}>
-              {editingId && (
-                <button className="btn-lift" style={styles.deleteBtn} onClick={handleDelete}>
-                  <Trash2 size={15} />
-                  excluir
+            {duplicating ? (
+              <div style={styles.duplicateRow}>
+                <Field icon={<Copy size={14} />} label="Duplicar para a data">
+                  <input
+                    type="date"
+                    style={styles.input}
+                    value={duplicateTargetDay}
+                    onChange={(e) => setDuplicateTargetDay(e.target.value)}
+                  />
+                </Field>
+                <div style={styles.modalFooter}>
+                  <div style={{ flex: 1 }} />
+                  <button className="btn-lift" style={styles.cancelBtn} onClick={() => setDuplicating(false)}>
+                    cancelar
+                  </button>
+                  <button className="btn-lift" style={styles.saveBtn} onClick={confirmDuplicate}>
+                    confirmar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div style={styles.modalFooter}>
+                {editingId && (
+                  <>
+                    <button className="btn-lift" style={styles.deleteBtn} onClick={handleDelete}>
+                      <Trash2 size={15} />
+                      excluir
+                    </button>
+                    <button className="btn-lift" style={styles.duplicateBtn} onClick={openDuplicate}>
+                      <Copy size={15} />
+                      duplicar
+                    </button>
+                  </>
+                )}
+                <div style={{ flex: 1 }} />
+                <button className="btn-lift" style={styles.cancelBtn} onClick={closeModal}>
+                  cancelar
                 </button>
-              )}
-              <div style={{ flex: 1 }} />
-              <button className="btn-lift" style={styles.cancelBtn} onClick={closeModal}>
-                cancelar
-              </button>
-              <button
-                className="btn-lift"
-                style={{ ...styles.saveBtn, opacity: isValid ? 1 : 0.7 }}
-                onClick={handleSave}
-              >
-                salvar
-              </button>
-            </div>
+                <button
+                  className="btn-lift"
+                  style={{ ...styles.saveBtn, opacity: isValid ? 1 : 0.7 }}
+                  onClick={handleSave}
+                >
+                  salvar
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3221,6 +3289,22 @@ const styles = {
     padding: "8px 12px",
     fontSize: 12.5,
     cursor: "pointer",
+  },
+  duplicateBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    border: "1px solid #C2D6EA",
+    color: "#1F4278",
+    background: "transparent",
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 12.5,
+    cursor: "pointer",
+  },
+  duplicateRow: {
+    display: "flex",
+    flexDirection: "column",
   },
   cancelBtn: {
     border: "1px solid #E0DDD3",
