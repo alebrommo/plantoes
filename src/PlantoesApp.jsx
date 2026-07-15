@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 import {
   ChevronLeft,
@@ -746,6 +746,43 @@ export default function PlantoesApp() {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Histórico de desfazer (Ctrl+Z): cada ação sabe reverter a si mesma,
+  // tanto no estado local quanto no Supabase.
+  const undoStackRef = useRef([]);
+
+  const pushUndo = useCallback((action) => {
+    undoStackRef.current = [...undoStackRef.current, action].slice(-20);
+  }, []);
+
+  const undo = useCallback(async () => {
+    const stack = undoStackRef.current;
+    if (stack.length === 0) {
+      showToast("Nada para desfazer", "error");
+      return;
+    }
+    const action = stack[stack.length - 1];
+    undoStackRef.current = stack.slice(0, -1);
+    try {
+      await action.run();
+      showToast(action.label || "Ação desfeita", "success");
+    } catch (err) {
+      showToast("Não foi possível desfazer", "error");
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    function handleKeyDown(evt) {
+      const isUndo = (evt.ctrlKey || evt.metaKey) && !evt.shiftKey && evt.key.toLowerCase() === "z";
+      if (!isUndo) return;
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      evt.preventDefault();
+      undo();
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [undo]);
+
   // Carrega os registros do Supabase e assina atualizações em tempo real,
   // para que mudanças feitas em outro dispositivo apareçam sem recarregar a página.
   useEffect(() => {
@@ -971,6 +1008,20 @@ export default function PlantoesApp() {
       showToast("Não foi possível salvar", "error");
     } else {
       showToast(novoPago ? "Marcado como pago" : "Marcado como a receber", "success");
+      pushUndo({
+        label: "Status de pagamento restaurado",
+        run: async () => {
+          setEntries((prev) => {
+            const list = prev[result.dayKey] || [];
+            const idx = list.findIndex((e) => e.id === result.id);
+            if (idx === -1) return prev;
+            const updated = [...list];
+            updated[idx] = { ...updated[idx], pago: result.pago };
+            return { ...prev, [result.dayKey]: updated };
+          });
+          await supabase.from(TABLE).update({ pago: result.pago }).eq("id", result.id);
+        },
+      });
     }
   };
 
@@ -1252,6 +1303,19 @@ export default function PlantoesApp() {
       showToast("Não foi possível duplicar", "error");
     } else {
       showToast(`Duplicado para ${formatShort(targetDay)}`, "success");
+      pushUndo({
+        label: "Duplicação desfeita",
+        run: async () => {
+          setEntries((prev) => {
+            const list = (prev[targetDay] || []).filter((e) => e.id !== copy.id);
+            const next = { ...prev };
+            if (list.length) next[targetDay] = list;
+            else delete next[targetDay];
+            return next;
+          });
+          await supabase.from(TABLE).delete().eq("id", copy.id);
+        },
+      });
     }
   };
 
@@ -1319,8 +1383,12 @@ export default function PlantoesApp() {
           }),
     };
 
+    const day = selectedDay;
+    const wasEditing = !!editingId;
+    const original = wasEditing ? (entries[day] || []).find((e) => e.id === editingId) : null;
+
     setEntries((prev) => {
-      const list = prev[selectedDay] ? [...prev[selectedDay]] : [];
+      const list = prev[day] ? [...prev[day]] : [];
       if (editingId) {
         const idx = list.findIndex((e) => e.id === editingId);
         if (idx >= 0) list[idx] = record;
@@ -1328,16 +1396,42 @@ export default function PlantoesApp() {
       } else {
         list.push(record);
       }
-      return { ...prev, [selectedDay]: list };
+      return { ...prev, [day]: list };
     });
     closeModal();
 
-    const { error } = await supabase.from(TABLE).upsert(entryToRow(selectedDay, record));
+    const { error } = await supabase.from(TABLE).upsert(entryToRow(day, record));
     if (error) {
       setSaveError(true);
       showToast("Não foi possível salvar", "error");
     } else {
-      showToast(editingId ? "Alterações salvas" : "Registro salvo", "success");
+      showToast(wasEditing ? "Alterações salvas" : "Registro salvo", "success");
+      if (wasEditing && original) {
+        pushUndo({
+          label: "Edição desfeita",
+          run: async () => {
+            setEntries((prev) => {
+              const list = (prev[day] || []).map((e) => (e.id === original.id ? original : e));
+              return { ...prev, [day]: list };
+            });
+            await supabase.from(TABLE).upsert(entryToRow(day, original));
+          },
+        });
+      } else {
+        pushUndo({
+          label: "Criação desfeita",
+          run: async () => {
+            setEntries((prev) => {
+              const list = (prev[day] || []).filter((e) => e.id !== record.id);
+              const next = { ...prev };
+              if (list.length) next[day] = list;
+              else delete next[day];
+              return next;
+            });
+            await supabase.from(TABLE).delete().eq("id", record.id);
+          },
+        });
+      }
     }
   };
 
@@ -1349,6 +1443,7 @@ export default function PlantoesApp() {
     }
     const idToDelete = editingId;
     const day = selectedDay;
+    const deletedEntry = (entries[day] || []).find((e) => e.id === idToDelete);
     setEntries((prev) => {
       const list = (prev[day] || []).filter((e) => e.id !== idToDelete);
       const next = { ...prev };
@@ -1364,6 +1459,18 @@ export default function PlantoesApp() {
       showToast("Não foi possível excluir", "error");
     } else {
       showToast("Registro excluído", "success");
+      if (deletedEntry) {
+        pushUndo({
+          label: "Exclusão desfeita",
+          run: async () => {
+            setEntries((prev) => {
+              const list = prev[day] ? [...prev[day]] : [];
+              return { ...prev, [day]: [...list, deletedEntry] };
+            });
+            await supabase.from(TABLE).insert(entryToRow(day, deletedEntry));
+          },
+        });
+      }
     }
   };
 
@@ -1393,6 +1500,25 @@ export default function PlantoesApp() {
       showToast("Não foi possível salvar", "error");
     } else {
       showToast("Movido para outra data", "success");
+      pushUndo({
+        label: "Movimentação desfeita",
+        run: async () => {
+          setEntries((prev) => {
+            const fromList = prev[toDay] || [];
+            const entry = fromList.find((e) => e.id === id);
+            if (!entry) return prev;
+            const newFromList = fromList.filter((e) => e.id !== id);
+            const toList = prev[fromDay] ? [...prev[fromDay]] : [];
+            toList.push(entry);
+            const next = { ...prev };
+            if (newFromList.length) next[toDay] = newFromList;
+            else delete next[toDay];
+            next[fromDay] = toList;
+            return next;
+          });
+          await supabase.from(TABLE).update({ day_key: fromDay }).eq("id", id);
+        },
+      });
     }
   };
 
