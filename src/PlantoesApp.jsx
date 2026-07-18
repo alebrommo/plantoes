@@ -24,6 +24,7 @@ import {
   FileSpreadsheet,
   Presentation,
   Copy,
+  BarChart3,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -1086,6 +1087,93 @@ export default function PlantoesApp() {
     [entries]
   );
 
+  // Todos os registros já lançados, de qualquer mês — base das estatísticas gerais.
+  const allEntries = useMemo(() => {
+    const list = [];
+    for (const [dayKey, dayList] of Object.entries(entries)) {
+      for (const e of dayList) list.push({ dayKey, ...e });
+    }
+    return list;
+  }, [entries]);
+
+  const statsGeral = useMemo(() => {
+    const total = allEntries.reduce((s, e) => s + (Number(e.value) || 0), 0);
+    const recebido = allEntries
+      .filter((e) => e.pago)
+      .reduce((s, e) => s + (Number(e.value) || 0), 0);
+    return { count: allEntries.length, total, recebido, aReceber: total - recebido };
+  }, [allEntries]);
+
+  const statsPorTipo = useMemo(() => {
+    const tipos = [
+      { id: "plantao", label: "Plantão" },
+      { id: "remocao", label: "Remoção" },
+      { id: "evento", label: "Evento" },
+    ];
+    return tipos.map((t) => {
+      const items = allEntries.filter((e) => e.type === t.id);
+      const total = items.reduce((s, e) => s + (Number(e.value) || 0), 0);
+      const recebido = items
+        .filter((e) => e.pago)
+        .reduce((s, e) => s + (Number(e.value) || 0), 0);
+      return {
+        ...t,
+        count: items.length,
+        total,
+        recebido,
+        aReceber: total - recebido,
+        media: items.length ? total / items.length : 0,
+      };
+    });
+  }, [allEntries]);
+
+  const statsPorEmpresa = useMemo(() => {
+    const groups = new Map();
+    allEntries.forEach((e) => {
+      if (e.type === "plantao") return;
+      const key = e.empresa || "Sem empresa";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    });
+    return Array.from(groups.entries())
+      .map(([empresa, items]) => {
+        const total = items.reduce((s, e) => s + (Number(e.value) || 0), 0);
+        const recebido = items
+          .filter((e) => e.pago)
+          .reduce((s, e) => s + (Number(e.value) || 0), 0);
+        return { empresa, count: items.length, total, recebido, aReceber: total - recebido };
+      })
+      .sort((a, b) => b.total - a.total);
+  }, [allEntries]);
+
+  const statsPorMes = useMemo(() => {
+    const groups = new Map();
+    allEntries.forEach((e) => {
+      const key = e.dayKey.slice(0, 7);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    });
+    return Array.from(groups.entries())
+      .map(([mesKey, items]) => {
+        const total = items.reduce((s, e) => s + (Number(e.value) || 0), 0);
+        const recebido = items
+          .filter((e) => e.pago)
+          .reduce((s, e) => s + (Number(e.value) || 0), 0);
+        const [y, m] = mesKey.split("-").map(Number);
+        return {
+          mesKey,
+          label: `${MESES[m - 1]} ${y}`,
+          plantoes: items.filter((e) => e.type === "plantao").length,
+          remocoes: items.filter((e) => e.type === "remocao").length,
+          eventos: items.filter((e) => e.type === "evento").length,
+          total,
+          recebido,
+          aReceber: total - recebido,
+        };
+      })
+      .sort((a, b) => b.mesKey.localeCompare(a.mesKey));
+  }, [allEntries]);
+
   const searchResults = useMemo(() => {
     const nameQ = normText(searchName.trim());
     const results = [];
@@ -1778,7 +1866,137 @@ export default function PlantoesApp() {
             <Search size={14} />
             buscar
           </button>
+          <button
+            onClick={() => setActiveTab("estatisticas")}
+            className="pill-btn"
+            style={{
+              ...styles.tabBtn,
+              ...(activeTab === "estatisticas" ? styles.tabBtnActive : {}),
+            }}
+          >
+            <BarChart3 size={14} />
+            estatísticas
+          </button>
         </div>
+
+        {activeTab === "estatisticas" && (
+          <div style={styles.searchWrap}>
+            <div style={styles.summaryBar}>
+              <StatCard label="registros no total" value={String(statsGeral.count)} />
+              <StatCard label="valor total" value={currency(statsGeral.total)} />
+              <StatCard
+                label="recebido"
+                value={currency(statsGeral.recebido)}
+                color="#206B3C"
+                bg="#E2F2E7"
+              />
+              <StatCard
+                label="a receber"
+                value={currency(statsGeral.aReceber)}
+                color="#8C6D1B"
+                bg="#F6EFDD"
+              />
+            </div>
+
+            <p style={styles.statsSectionTitle}>Por tipo</p>
+            <div style={styles.searchDropdown}>
+              <div style={styles.searchScrollArea}>
+                <table style={styles.searchTable}>
+                  <thead>
+                    <tr>
+                      <th style={styles.searchTh}>Tipo</th>
+                      <th style={{ ...styles.searchTh, textAlign: "right" }}>Qtd.</th>
+                      <th style={{ ...styles.searchTh, textAlign: "right" }}>Total</th>
+                      <th style={{ ...styles.searchTh, textAlign: "right" }}>Recebido</th>
+                      <th style={{ ...styles.searchTh, textAlign: "right" }}>A receber</th>
+                      <th style={{ ...styles.searchTh, textAlign: "right" }}>Média</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statsPorTipo.map((t) => (
+                      <tr key={t.id}>
+                        <td style={styles.searchTdName}>{t.label}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{t.count}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(t.total)}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(t.recebido)}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(t.aReceber)}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(t.media)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p style={styles.statsSectionTitle}>Por empresa</p>
+            <div style={styles.searchDropdown}>
+              {statsPorEmpresa.length === 0 ? (
+                <div style={styles.searchEmpty}>Nenhum registro com empresa ainda.</div>
+              ) : (
+                <div style={styles.searchScrollArea}>
+                  <table style={styles.searchTable}>
+                    <thead>
+                      <tr>
+                        <th style={styles.searchTh}>Empresa</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Qtd.</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Total</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Recebido</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>A receber</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statsPorEmpresa.map((e) => (
+                        <tr key={e.empresa}>
+                          <td style={styles.searchTdName}>{e.empresa}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{e.count}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(e.total)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(e.recebido)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(e.aReceber)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <p style={styles.statsSectionTitle}>Por mês</p>
+            <div style={styles.searchDropdown}>
+              {statsPorMes.length === 0 ? (
+                <div style={styles.searchEmpty}>Nenhum registro ainda.</div>
+              ) : (
+                <div style={styles.searchScrollArea}>
+                  <table style={styles.searchTable}>
+                    <thead>
+                      <tr>
+                        <th style={styles.searchTh}>Mês</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Plantões</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Remoções</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Eventos</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Total</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Recebido</th>
+                        <th style={{ ...styles.searchTh, textAlign: "right" }}>A receber</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {statsPorMes.map((m) => (
+                        <tr key={m.mesKey}>
+                          <td style={styles.searchTdName}>{m.label}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.plantoes}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.remocoes}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.eventos}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(m.total)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(m.recebido)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(m.aReceber)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {activeTab === "buscar" && (
         <div style={styles.searchWrap}>
@@ -2747,6 +2965,17 @@ function SummaryChip({ icon, label, count, value, color, bg }) {
   );
 }
 
+function StatCard({ label, value, color = "#1C2B39", bg = "#F1EFE9" }) {
+  return (
+    <div style={{ ...styles.summaryChip, background: bg, color }}>
+      <div style={styles.summaryChipIconRow}>
+        <span style={styles.summaryChipLabel}>{label}</span>
+      </div>
+      <div style={styles.summaryChipValue}>{value}</div>
+    </div>
+  );
+}
+
 function Field({ icon, label, children }) {
   return (
     <div style={styles.field}>
@@ -2961,6 +3190,14 @@ const styles = {
     borderColor: "#1C2B39",
     color: "#F7F5F0",
     fontWeight: 600,
+  },
+  statsSectionTitle: {
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: "#1C2B39",
+    margin: "16px 0 6px",
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
   },
   searchEmpty: { padding: "14px 12px", fontSize: 12.5, color: "#5B6B75" },
   searchTable: { width: "100%", minWidth: 460, borderCollapse: "collapse", fontSize: 12.5 },
