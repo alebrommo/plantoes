@@ -2586,7 +2586,7 @@ const globalCss = `
   }
   @media (max-width: 480px) {
     .cal-grid { gap: 3px !important; }
-    .cal-cell { min-height: 74px !important; padding: 4px !important; }
+    .cal-cell { height: 74px !important; padding: 4px !important; }
   }
   input:focus, textarea:focus, button:focus-visible {
     outline: 2px solid #2D6E6E;
@@ -3097,16 +3097,17 @@ const styles = {
     gridTemplateColumns: "repeat(7, 1fr)",
     gap: 6,
   },
-  emptyCell: { minHeight: 90 },
+  emptyCell: { height: 92 },
   cell: {
     background: "#fff",
     border: "1px solid #E0DDD3",
     borderRadius: 10,
     padding: 6,
-    minHeight: 90,
+    height: 92,
     display: "flex",
     flexDirection: "column",
     gap: 4,
+    overflow: "hidden",
   },
   cellToday: {
     borderColor: "#2D6E6E",
@@ -3149,7 +3150,14 @@ const styles = {
     justifyContent: "center",
     cursor: "pointer",
   },
-  chipStack: { display: "flex", flexDirection: "column", gap: 3, overflow: "hidden" },
+  chipStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 3,
+    overflowY: "auto",
+    flex: 1,
+    minHeight: 0,
+  },
   entryChip: {
     display: "flex",
     alignItems: "center",
@@ -3161,6 +3169,7 @@ const styles = {
     cursor: "grab",
     textAlign: "left",
     width: "100%",
+    flexShrink: 0,
   },
   entryChipDragging: {
     opacity: 0.4,
