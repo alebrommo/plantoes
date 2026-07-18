@@ -781,6 +781,7 @@ export default function PlantoesApp() {
     return { year: t.getFullYear(), month: t.getMonth() };
   });
   const [selectedDay, setSelectedDay] = useState(null); // "YYYY-MM-DD"
+  const [viewDay, setViewDay] = useState(() => todayKey()); // dia exibido no painel abaixo do calendário
   const [draggedEntry, setDraggedEntry] = useState(null); // { dayKey, id }
   const [dragOverDay, setDragOverDay] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -2538,8 +2539,10 @@ export default function PlantoesApp() {
                   style={{
                     ...styles.cell,
                     ...(isToday ? styles.cellToday : {}),
+                    ...(dayKey === viewDay ? styles.cellSelected : {}),
                     ...(isDragOver ? styles.cellDragOver : {}),
                   }}
+                  onClick={() => setViewDay(dayKey)}
                   onDragOver={(evt) => {
                     evt.preventDefault();
                     if (dragOverDay !== dayKey) setDragOverDay(dayKey);
@@ -2622,6 +2625,67 @@ export default function PlantoesApp() {
                 </div>
               );
             })}
+          </div>
+
+          <div style={styles.dayPanel}>
+            <div style={styles.dayPanelHeader}>
+              <span style={styles.dayPanelTitle}>{formatFullDate(viewDay)}</span>
+              <button
+                type="button"
+                className="btn-lift"
+                style={styles.dayPanelAddBtn}
+                onClick={() => openAddModal(viewDay)}
+              >
+                <Plus size={13} /> adicionar
+              </button>
+            </div>
+            {(entries[viewDay] || []).length === 0 ? (
+              <div style={styles.dayPanelEmpty}>Nenhum registro neste dia.</div>
+            ) : (
+              <div style={styles.dayPanelList}>
+                {(entries[viewDay] || []).map((e) => (
+                  <button
+                    key={e.id}
+                    type="button"
+                    className="btn-lift"
+                    style={styles.dayPanelItem}
+                    onClick={() => openEditModal(viewDay, e)}
+                  >
+                    <span style={styles.dayPanelItemIcon}>
+                      {e.type === "plantao" ? (
+                        <Stethoscope size={15} />
+                      ) : e.type === "evento" ? (
+                        <Presentation size={15} />
+                      ) : (
+                        <Truck size={15} />
+                      )}
+                    </span>
+                    <span style={styles.dayPanelItemBody}>
+                      <span style={styles.dayPanelItemTitle}>
+                        {e.type === "remocao"
+                          ? e.empresa || "remoção"
+                          : e.local || (e.type === "evento" ? "evento" : "plantão")}
+                      </span>
+                      <span style={styles.dayPanelItemSub}>
+                        {e.iH ? `${e.iH}:${e.iM} – ${e.fH}:${e.fM}` : "sem horário"}
+                        {e.empresa && e.type !== "remocao" ? ` · ${e.empresa}` : ""}
+                      </span>
+                    </span>
+                    <span style={styles.dayPanelItemRight}>
+                      <span style={styles.dayPanelItemValue}>{currency(e.value)}</span>
+                      <span
+                        style={{
+                          ...styles.dayPanelBadge,
+                          ...(e.pago ? styles.dayPanelBadgePago : styles.dayPanelBadgePendente),
+                        }}
+                      >
+                        {e.pago ? "pago" : "a receber"}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </>
       ))}
@@ -4117,6 +4181,124 @@ const styles = {
     borderColor: "#2D6E6E",
     background: "#E4F0EF",
     boxShadow: "0 0 0 2px #2D6E6E inset",
+  },
+  cellSelected: {
+    borderColor: "#1C2B39",
+    boxShadow: "0 0 0 2px #1C2B39 inset",
+  },
+  dayPanel: {
+    marginTop: 14,
+    background: "#fff",
+    border: "1px solid #E0DDD3",
+    borderRadius: 10,
+    boxShadow: "0 4px 14px rgba(28,43,57,0.06)",
+    padding: 12,
+  },
+  dayPanelHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  dayPanelTitle: {
+    fontSize: 13.5,
+    fontWeight: 700,
+    color: "#1C2B39",
+    textTransform: "capitalize",
+  },
+  dayPanelAddBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 12,
+    fontWeight: 600,
+    color: "#fff",
+    background: "#1C2B39",
+    border: "none",
+    borderRadius: 8,
+    padding: "6px 10px",
+    cursor: "pointer",
+  },
+  dayPanelEmpty: {
+    fontSize: 12.5,
+    color: "#8A8578",
+    padding: "10px 2px",
+  },
+  dayPanelList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  dayPanelItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    textAlign: "left",
+    border: "1px solid #E7E3D8",
+    background: "#FCFBF8",
+    borderRadius: 8,
+    padding: "8px 10px",
+    cursor: "pointer",
+  },
+  dayPanelItemIcon: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    background: "#F1EFE9",
+    color: "#1C2B39",
+    flexShrink: 0,
+  },
+  dayPanelItemBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    flex: 1,
+    minWidth: 0,
+  },
+  dayPanelItemTitle: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#1C2B39",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  dayPanelItemSub: {
+    fontSize: 11.5,
+    color: "#8A8578",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  dayPanelItemRight: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: 3,
+    flexShrink: 0,
+  },
+  dayPanelItemValue: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#1C2B39",
+  },
+  dayPanelBadge: {
+    fontSize: 10.5,
+    fontWeight: 600,
+    borderRadius: 6,
+    padding: "2px 6px",
+  },
+  dayPanelBadgePago: {
+    color: "#206B3C",
+    background: "#E2F2E7",
+  },
+  dayPanelBadgePendente: {
+    color: "#8C6D1B",
+    background: "#F6EFDD",
   },
   dragHint: {
     fontSize: 11,
