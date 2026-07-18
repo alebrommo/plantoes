@@ -1,6 +1,19 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+} from "recharts";
+import {
   ChevronLeft,
   ChevronRight,
   Plus,
@@ -159,6 +172,8 @@ const MESES = [
   "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro",
 ];
 const DIAS_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+
+const TYPE_CHART_COLORS = { plantao: "#2D6E6E", remocao: "#B5541F", evento: "#2A5DA8" };
 
 const PALETTE = [
   { id: "teal", label: "Teal", base: "#2D6E6E", bg: "#E4F0EF", text: "#215454" },
@@ -1225,6 +1240,16 @@ export default function PlantoesApp() {
       .sort((a, b) => b.mesKey.localeCompare(a.mesKey));
   }, [allEntries]);
 
+  const statsPorMesChart = useMemo(
+    () => [...statsPorMes].slice(0, 12).reverse(),
+    [statsPorMes]
+  );
+
+  const statsPorEmpresaChart = useMemo(
+    () => statsPorEmpresa.slice(0, 8),
+    [statsPorEmpresa]
+  );
+
   const searchResults = useMemo(() => {
     const nameQ = normText(searchName.trim());
     const results = [];
@@ -1987,6 +2012,30 @@ export default function PlantoesApp() {
             </div>
 
             <p style={styles.statsSectionTitle}>Por tipo</p>
+            {statsPorTipo.some((t) => t.total > 0) && (
+              <div style={styles.chartWrap}>
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie
+                      data={statsPorTipo.filter((t) => t.total > 0)}
+                      dataKey="total"
+                      nameKey="label"
+                      innerRadius={50}
+                      outerRadius={85}
+                      paddingAngle={2}
+                    >
+                      {statsPorTipo
+                        .filter((t) => t.total > 0)
+                        .map((t) => (
+                          <Cell key={t.id} fill={TYPE_CHART_COLORS[t.id]} />
+                        ))}
+                    </Pie>
+                    <Tooltip formatter={(v) => currency(v)} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
             <div style={styles.searchDropdown}>
               <div style={styles.searchScrollArea}>
                 <table style={styles.searchTable}>
@@ -2017,6 +2066,19 @@ export default function PlantoesApp() {
             </div>
 
             <p style={styles.statsSectionTitle}>Por empresa</p>
+            {statsPorEmpresaChart.length > 0 && (
+              <div style={styles.chartWrap}>
+                <ResponsiveContainer width="100%" height={Math.max(160, statsPorEmpresaChart.length * 40)}>
+                  <BarChart data={statsPorEmpresaChart} layout="vertical" margin={{ left: 8, right: 16 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" tickFormatter={(v) => currency(v)} fontSize={11} />
+                    <YAxis type="category" dataKey="empresa" width={110} fontSize={11} />
+                    <Tooltip formatter={(v) => currency(v)} />
+                    <Bar dataKey="total" name="Total" fill="#1C2B39" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
             <div style={styles.searchDropdown}>
               {statsPorEmpresa.length === 0 ? (
                 <div style={styles.searchEmpty}>Nenhum registro com empresa ainda.</div>
@@ -2049,6 +2111,21 @@ export default function PlantoesApp() {
             </div>
 
             <p style={styles.statsSectionTitle}>Por mês</p>
+            {statsPorMesChart.length > 0 && (
+              <div style={styles.chartWrap}>
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={statsPorMesChart} margin={{ left: 8, right: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="label" fontSize={11} />
+                    <YAxis tickFormatter={(v) => currency(v)} fontSize={11} width={70} />
+                    <Tooltip formatter={(v) => currency(v)} />
+                    <Legend />
+                    <Bar dataKey="recebido" name="Recebido" stackId="v" fill="#2F8F52" />
+                    <Bar dataKey="aReceber" name="A receber" stackId="v" fill="#B8912B" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
             <div style={styles.searchDropdown}>
               {statsPorMes.length === 0 ? (
                 <div style={styles.searchEmpty}>Nenhum registro ainda.</div>
@@ -3536,6 +3613,14 @@ const styles = {
     justifyContent: "center",
     cursor: "pointer",
     flexShrink: 0,
+  },
+  chartWrap: {
+    marginTop: 12,
+    background: "#fff",
+    border: "1px solid #E0DDD3",
+    borderRadius: 10,
+    boxShadow: "0 4px 14px rgba(28,43,57,0.06)",
+    padding: "16px 8px 8px",
   },
   searchDropdown: {
     marginTop: 12,
