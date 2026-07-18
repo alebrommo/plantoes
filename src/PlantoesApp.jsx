@@ -3251,12 +3251,16 @@ function AuthScreen({ showToast }) {
         });
         if (err) throw err;
       } else if (mode === "signup") {
-        const { error: err } = await supabase.auth.signUp({
+        const { data, error: err } = await supabase.auth.signUp({
           email: email.trim(),
           password,
         });
         if (err) throw err;
-        setInfo("Conta criada! Se pedir confirmação, verifique seu e-mail antes de entrar.");
+        if (data.session) {
+          showToast("Conta criada!", "success");
+        } else {
+          setInfo("Conta criada! Verifique seu e-mail para confirmar antes de entrar.");
+        }
       } else {
         const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: window.location.origin,
