@@ -1501,6 +1501,7 @@ export default function PlantoesApp() {
   const goToday = () => {
     const t = new Date();
     setCursor({ year: t.getFullYear(), month: t.getMonth() });
+    setViewDay(todayKey());
   };
 
   const openAddModal = (dayKey) => {
