@@ -2481,7 +2481,7 @@ export default function PlantoesApp() {
                     ...(dayKey === viewDay ? styles.cellSelected : {}),
                     ...(isDragOver ? styles.cellDragOver : {}),
                   }}
-                  onClick={() => setViewDay(dayKey)}
+                  onClick={() => setViewDay((prev) => (prev === dayKey ? null : dayKey))}
                   onDragOver={(evt) => {
                     evt.preventDefault();
                     if (dragOverDay !== dayKey) setDragOverDay(dayKey);
@@ -2568,17 +2568,23 @@ export default function PlantoesApp() {
 
           <div style={styles.dayPanel}>
             <div style={styles.dayPanelHeader}>
-              <span style={styles.dayPanelTitle}>{formatFullDate(viewDay)}</span>
-              <button
-                type="button"
-                className="btn-lift"
-                style={styles.dayPanelAddBtn}
-                onClick={() => openAddModal(viewDay)}
-              >
-                <Plus size={13} /> adicionar
-              </button>
+              <span style={styles.dayPanelTitle}>
+                {viewDay ? formatFullDate(viewDay) : "nenhum dia selecionado"}
+              </span>
+              {viewDay && (
+                <button
+                  type="button"
+                  className="btn-lift"
+                  style={styles.dayPanelAddBtn}
+                  onClick={() => openAddModal(viewDay)}
+                >
+                  <Plus size={13} /> adicionar
+                </button>
+              )}
             </div>
-            {(entries[viewDay] || []).length === 0 ? (
+            {!viewDay ? (
+              <div style={styles.dayPanelEmpty}>Clique em um dia do calendário para ver os detalhes.</div>
+            ) : (entries[viewDay] || []).length === 0 ? (
               <div style={styles.dayPanelEmpty}>Nenhum registro neste dia.</div>
             ) : (
               <div style={styles.dayPanelList}>
