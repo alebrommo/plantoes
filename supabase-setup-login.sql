@@ -32,4 +32,4 @@ create policy "Usuarios excluem so os proprios registros" on entries
   using (auth.uid() = user_id);
 
 -- 4. Migra os registros que já existiam (sem dono) para a sua conta
-update entries set user_id = '20ab2fd0-59d3-4cc3-a0b2-6a724525944f' where user_id is null;
+update entries set user_id = '0f7aa9f5-82c9-4d30-adc8-21d7cc437cf9' where user_id is null;

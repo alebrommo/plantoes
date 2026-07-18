@@ -3101,61 +3101,95 @@ function Logo({ size = 40 }) {
   );
 }
 
+function translateAuthError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  const code = err?.code || err?.error_code || "";
+  if (code === "invalid_credentials" || msg.includes("invalid login credentials")) {
+    return "E-mail ou senha incorretos. Confira os dados e tente novamente.";
+  }
+  if (code === "email_not_confirmed" || msg.includes("email not confirmed")) {
+    return "Este e-mail ainda não foi confirmado. Verifique sua caixa de entrada (e o spam) e clique no link de confirmação antes de entrar.";
+  }
+  if (code === "user_already_exists" || msg.includes("already registered") || msg.includes("already been registered")) {
+    return "Este e-mail já está cadastrado. Tente entrar ou use \"Esqueci minha senha\".";
+  }
+  if (msg.includes("user not found")) {
+    return "Não existe conta cadastrada com este e-mail.";
+  }
+  if (code === "over_email_send_rate_limit" || msg.includes("rate limit")) {
+    return "Muitas tentativas em pouco tempo. Aguarde alguns minutos e tente de novo.";
+  }
+  if (msg.includes("password should be at least")) {
+    return "A senha precisa ter pelo menos 6 caracteres.";
+  }
+  if (msg.includes("unable to validate email") || msg.includes("invalid email")) {
+    return "E-mail inválido. Confira se foi digitado corretamente.";
+  }
+  if (msg.includes("failed to fetch") || msg.includes("network")) {
+    return "Não foi possível conectar. Verifique sua internet e tente novamente.";
+  }
+  return err?.message || "Não foi possível continuar. Tente novamente.";
+}
+
 function AuthScreen({ showToast }) {
   const [mode, setMode] = useState("login"); // "login" | "signup" | "forgot"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [info, setInfo] = useState("");
+  const [error, setError] = useState("");
 
   const switchMode = (next) => {
     setMode(next);
     setInfo("");
+    setError("");
   };
 
   const handleSubmit = async (evt) => {
     evt.preventDefault();
+    setError("");
     if (!supabaseConfigured) {
-      showToast("Supabase não configurado", "error");
+      setError("Supabase não configurado");
       return;
     }
     if (!email.trim()) {
-      showToast("Preencha o e-mail", "error");
+      setError("Preencha o e-mail");
       return;
     }
     if (mode !== "forgot" && !password) {
-      showToast("Preencha a senha", "error");
+      setError("Preencha a senha");
       return;
     }
     if (mode === "signup" && password.length < 6) {
-      showToast("A senha precisa ter pelo menos 6 caracteres", "error");
+      setError("A senha precisa ter pelo menos 6 caracteres");
       return;
     }
     setSubmitting(true);
     setInfo("");
     try {
       if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { error: err } = await supabase.auth.signInWithPassword({
           email: email.trim(),
           password,
         });
-        if (error) throw error;
+        if (err) throw err;
       } else if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        const { error: err } = await supabase.auth.signUp({
           email: email.trim(),
           password,
         });
-        if (error) throw error;
+        if (err) throw err;
         setInfo("Conta criada! Se pedir confirmação, verifique seu e-mail antes de entrar.");
       } else {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: window.location.origin,
         });
-        if (error) throw error;
+        if (err) throw err;
         setInfo("Link de recuperação enviado! Confira seu e-mail (e a caixa de spam).");
       }
     } catch (err) {
-      showToast(err.message || "Não foi possível continuar", "error");
+      setError(translateAuthError(err));
+      showToast(translateAuthError(err), "error");
     } finally {
       setSubmitting(false);
     }
@@ -3228,6 +3262,7 @@ function AuthScreen({ showToast }) {
             </button>
           )}
 
+          {error && <p style={styles.authError}>{error}</p>}
           {info && <p style={styles.authInfo}>{info}</p>}
 
           <button
@@ -3917,6 +3952,14 @@ const styles = {
     fontSize: 12.5,
     color: "#206B3C",
     background: "#E2F2E7",
+    borderRadius: 8,
+    padding: "8px 10px",
+    marginBottom: 4,
+  },
+  authError: {
+    fontSize: 12.5,
+    color: "#A02B2B",
+    background: "#FBE4E4",
     borderRadius: 8,
     padding: "8px 10px",
     marginBottom: 4,
