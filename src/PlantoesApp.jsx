@@ -2012,31 +2012,31 @@ export default function PlantoesApp() {
             </div>
 
             <p style={styles.statsSectionTitle}>Por tipo</p>
-            {statsPorTipo.some((t) => t.total > 0) && (
-              <div style={styles.chartWrap}>
-                <ResponsiveContainer width="100%" height={240}>
-                  <PieChart>
-                    <Pie
-                      data={statsPorTipo.filter((t) => t.total > 0)}
-                      dataKey="total"
-                      nameKey="label"
-                      innerRadius={50}
-                      outerRadius={85}
-                      paddingAngle={2}
-                    >
-                      {statsPorTipo
-                        .filter((t) => t.total > 0)
-                        .map((t) => (
-                          <Cell key={t.id} fill={TYPE_CHART_COLORS[t.id]} />
-                        ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => currency(v)} />
-                    <Legend />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            )}
             <div style={styles.searchDropdown}>
+              {statsPorTipo.some((t) => t.total > 0) && (
+                <div style={styles.chartWrap}>
+                  <ResponsiveContainer width="100%" height={130}>
+                    <PieChart>
+                      <Pie
+                        data={statsPorTipo.filter((t) => t.total > 0)}
+                        dataKey="total"
+                        nameKey="label"
+                        innerRadius={34}
+                        outerRadius={58}
+                        paddingAngle={2}
+                      >
+                        {statsPorTipo
+                          .filter((t) => t.total > 0)
+                          .map((t) => (
+                            <Cell key={t.id} fill={TYPE_CHART_COLORS[t.id]} />
+                          ))}
+                      </Pie>
+                      <Tooltip formatter={(v) => currency(v)} />
+                      <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
               <div style={styles.searchScrollArea}>
                 <table style={styles.searchTable}>
                   <thead>
@@ -2066,20 +2066,20 @@ export default function PlantoesApp() {
             </div>
 
             <p style={styles.statsSectionTitle}>Por empresa</p>
-            {statsPorEmpresaChart.length > 0 && (
-              <div style={styles.chartWrap}>
-                <ResponsiveContainer width="100%" height={Math.max(160, statsPorEmpresaChart.length * 40)}>
-                  <BarChart data={statsPorEmpresaChart} layout="vertical" margin={{ left: 8, right: 16 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" tickFormatter={(v) => currency(v)} fontSize={11} />
-                    <YAxis type="category" dataKey="empresa" width={110} fontSize={11} />
-                    <Tooltip formatter={(v) => currency(v)} />
-                    <Bar dataKey="total" name="Total" fill="#1C2B39" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
             <div style={styles.searchDropdown}>
+              {statsPorEmpresaChart.length > 0 && (
+                <div style={styles.chartWrap}>
+                  <ResponsiveContainer width="100%" height={Math.min(180, Math.max(90, statsPorEmpresaChart.length * 26))}>
+                    <BarChart data={statsPorEmpresaChart} layout="vertical" margin={{ top: 2, left: 8, right: 12, bottom: 2 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                      <XAxis type="number" tickFormatter={(v) => currency(v)} fontSize={10} height={20} />
+                      <YAxis type="category" dataKey="empresa" width={90} fontSize={10} />
+                      <Tooltip formatter={(v) => currency(v)} />
+                      <Bar dataKey="total" name="Total" fill="#1C2B39" radius={[0, 3, 3, 0]} barSize={14} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
               {statsPorEmpresa.length === 0 ? (
                 <div style={styles.searchEmpty}>Nenhum registro com empresa ainda.</div>
               ) : (
@@ -2111,22 +2111,22 @@ export default function PlantoesApp() {
             </div>
 
             <p style={styles.statsSectionTitle}>Por mês</p>
-            {statsPorMesChart.length > 0 && (
-              <div style={styles.chartWrap}>
-                <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={statsPorMesChart} margin={{ left: 8, right: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="label" fontSize={11} />
-                    <YAxis tickFormatter={(v) => currency(v)} fontSize={11} width={70} />
-                    <Tooltip formatter={(v) => currency(v)} />
-                    <Legend />
-                    <Bar dataKey="recebido" name="Recebido" stackId="v" fill="#2F8F52" />
-                    <Bar dataKey="aReceber" name="A receber" stackId="v" fill="#B8912B" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
             <div style={styles.searchDropdown}>
+              {statsPorMesChart.length > 0 && (
+                <div style={styles.chartWrap}>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <BarChart data={statsPorMesChart} margin={{ top: 2, left: 4, right: 8, bottom: 2 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="label" fontSize={10} />
+                      <YAxis tickFormatter={(v) => currency(v)} fontSize={10} width={60} />
+                      <Tooltip formatter={(v) => currency(v)} />
+                      <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="recebido" name="Recebido" stackId="v" fill="#2F8F52" barSize={16} />
+                      <Bar dataKey="aReceber" name="A receber" stackId="v" fill="#B8912B" radius={[3, 3, 0, 0]} barSize={16} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
               {statsPorMes.length === 0 ? (
                 <div style={styles.searchEmpty}>Nenhum registro ainda.</div>
               ) : (
@@ -3615,12 +3615,8 @@ const styles = {
     flexShrink: 0,
   },
   chartWrap: {
-    marginTop: 12,
-    background: "#fff",
-    border: "1px solid #E0DDD3",
-    borderRadius: 10,
-    boxShadow: "0 4px 14px rgba(28,43,57,0.06)",
-    padding: "16px 8px 8px",
+    padding: "10px 6px 2px",
+    borderBottom: "1px solid #EFEBE1",
   },
   searchDropdown: {
     marginTop: 12,
