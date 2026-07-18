@@ -249,66 +249,6 @@ function ColorScroll({ options, value, onChange }) {
   );
 }
 
-function ScrollColumn({ options, value, onChange }) {
-  const ref = React.useRef(null);
-  const timeoutRef = React.useRef(null);
-  const itemH = 32;
-
-  React.useEffect(() => {
-    const idx = Math.max(0, options.indexOf(value));
-    if (ref.current) ref.current.scrollTop = idx * itemH;
-    // only position on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const settle = () => {
-    if (!ref.current) return;
-    const idx = Math.max(
-      0,
-      Math.min(options.length - 1, Math.round(ref.current.scrollTop / itemH))
-    );
-    ref.current.scrollTo({ top: idx * itemH, behavior: "smooth" });
-    onChange(options[idx]);
-  };
-
-  const handleScroll = () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(settle, 110);
-  };
-
-  const pick = (opt, idx) => {
-    if (ref.current) ref.current.scrollTo({ top: idx * itemH, behavior: "smooth" });
-    onChange(opt);
-  };
-
-  return (
-    <div style={styles.scrollColWrap}>
-      <div style={styles.scrollColBand} />
-      <div
-        ref={ref}
-        className="plantoes-scroll-col"
-        onScroll={handleScroll}
-        style={styles.scrollCol}
-      >
-        <div style={{ height: itemH }} />
-        {options.map((opt, idx) => (
-          <div
-            key={opt}
-            onClick={() => pick(opt, idx)}
-            style={{
-              ...styles.scrollItem,
-              ...(opt === value ? styles.scrollItemActive : {}),
-            }}
-          >
-            {opt}
-          </div>
-        ))}
-        <div style={{ height: itemH }} />
-      </div>
-    </div>
-  );
-}
-
 const currency = (n) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
     Number(n) || 0
@@ -316,8 +256,6 @@ const currency = (n) =>
 
 const pad = (n) => String(n).padStart(2, "0");
 const keyFor = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
-const HOURS = Array.from({ length: 24 }, (_, i) => pad(i));
-const MINUTES = Array.from({ length: 60 }, (_, i) => pad(i));
 const parseBRL = (str) => {
   if (str == null) return NaN;
   let s = String(str).trim();
@@ -2761,36 +2699,28 @@ export default function PlantoesApp() {
                     <div style={styles.timeRangeRow}>
                       <div style={styles.timeGroup}>
                         <div style={styles.timeGroupLabel}>início</div>
-                        <div style={styles.timeColsRow}>
-                          <ScrollColumn
-                            options={HOURS}
-                            value={form.iH}
-                            onChange={(v) => setForm((f) => ({ ...f, iH: v }))}
-                          />
-                          <span style={styles.timeColon}>:</span>
-                          <ScrollColumn
-                            options={MINUTES}
-                            value={form.iM}
-                            onChange={(v) => setForm((f) => ({ ...f, iM: v }))}
-                          />
-                        </div>
+                        <input
+                          type="time"
+                          style={styles.timeInput}
+                          value={form.iH && form.iM ? `${form.iH}:${form.iM}` : ""}
+                          onChange={(e) => {
+                            const [h, m] = e.target.value.split(":");
+                            setForm((f) => ({ ...f, iH: h || "", iM: m || "" }));
+                          }}
+                        />
                       </div>
                       <ArrowRight size={16} style={styles.timeArrow} />
                       <div style={styles.timeGroup}>
                         <div style={styles.timeGroupLabel}>fim</div>
-                        <div style={styles.timeColsRow}>
-                          <ScrollColumn
-                            options={HOURS}
-                            value={form.fH}
-                            onChange={(v) => setForm((f) => ({ ...f, fH: v }))}
-                          />
-                          <span style={styles.timeColon}>:</span>
-                          <ScrollColumn
-                            options={MINUTES}
-                            value={form.fM}
-                            onChange={(v) => setForm((f) => ({ ...f, fM: v }))}
-                          />
-                        </div>
+                        <input
+                          type="time"
+                          style={styles.timeInput}
+                          value={form.fH && form.fM ? `${form.fH}:${form.fM}` : ""}
+                          onChange={(e) => {
+                            const [h, m] = e.target.value.split(":");
+                            setForm((f) => ({ ...f, fH: h || "", fM: m || "" }));
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -2814,36 +2744,28 @@ export default function PlantoesApp() {
                     <div style={styles.timeRangeRow}>
                       <div style={styles.timeGroup}>
                         <div style={styles.timeGroupLabel}>início</div>
-                        <div style={styles.timeColsRow}>
-                          <ScrollColumn
-                            options={HOURS}
-                            value={form.iH}
-                            onChange={(v) => setForm((f) => ({ ...f, iH: v }))}
-                          />
-                          <span style={styles.timeColon}>:</span>
-                          <ScrollColumn
-                            options={MINUTES}
-                            value={form.iM}
-                            onChange={(v) => setForm((f) => ({ ...f, iM: v }))}
-                          />
-                        </div>
+                        <input
+                          type="time"
+                          style={styles.timeInput}
+                          value={form.iH && form.iM ? `${form.iH}:${form.iM}` : ""}
+                          onChange={(e) => {
+                            const [h, m] = e.target.value.split(":");
+                            setForm((f) => ({ ...f, iH: h || "", iM: m || "" }));
+                          }}
+                        />
                       </div>
                       <ArrowRight size={16} style={styles.timeArrow} />
                       <div style={styles.timeGroup}>
                         <div style={styles.timeGroupLabel}>fim</div>
-                        <div style={styles.timeColsRow}>
-                          <ScrollColumn
-                            options={HOURS}
-                            value={form.fH}
-                            onChange={(v) => setForm((f) => ({ ...f, fH: v }))}
-                          />
-                          <span style={styles.timeColon}>:</span>
-                          <ScrollColumn
-                            options={MINUTES}
-                            value={form.fM}
-                            onChange={(v) => setForm((f) => ({ ...f, fM: v }))}
-                          />
-                        </div>
+                        <input
+                          type="time"
+                          style={styles.timeInput}
+                          value={form.fH && form.fM ? `${form.fH}:${form.fM}` : ""}
+                          onChange={(e) => {
+                            const [h, m] = e.target.value.split(":");
+                            setForm((f) => ({ ...f, fH: h || "", fM: m || "" }));
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -4568,50 +4490,16 @@ const styles = {
     textTransform: "uppercase",
     letterSpacing: "0.04em",
   },
-  timeColsRow: { display: "flex", alignItems: "center", gap: 3 },
-  timeColon: { fontFamily: "'IBM Plex Mono', monospace", fontWeight: 700, color: "#5B6B75" },
   timeArrow: { marginTop: 26, color: "#5B6B75", flexShrink: 0 },
-  scrollColWrap: {
-    position: "relative",
-    width: 50,
-    height: 96,
-    borderRadius: 8,
+  timeInput: {
     border: "1px solid #E0DDD3",
-    background: "#fff",
-    overflow: "hidden",
-  },
-  scrollColBand: {
-    position: "absolute",
-    top: 32,
-    left: 0,
-    right: 0,
-    height: 32,
-    borderTop: "1px solid #2D6E6E",
-    borderBottom: "1px solid #2D6E6E",
-    background: "rgba(45,110,110,0.06)",
-    pointerEvents: "none",
-    zIndex: 1,
-  },
-  scrollCol: {
-    height: 96,
-    overflowY: "auto",
-    scrollSnapType: "y mandatory",
-    textAlign: "center",
-    position: "relative",
-  },
-  scrollItem: {
-    height: 32,
-    lineHeight: "32px",
-    fontFamily: "'IBM Plex Mono', monospace",
-    fontSize: 14,
-    color: "#B7BEC2",
-    scrollSnapAlign: "center",
-    cursor: "pointer",
-    userSelect: "none",
-  },
-  scrollItemActive: {
+    borderRadius: 8,
+    padding: "9px 10px",
+    fontSize: 13.5,
+    fontFamily: "'Inter', sans-serif",
     color: "#1C2B39",
-    fontWeight: 700,
+    background: "#fff",
+    width: 130,
   },
   rowFields: { display: "flex", gap: 6 },
   input: {
