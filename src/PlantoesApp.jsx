@@ -29,6 +29,44 @@ import { supabase, supabaseConfigured } from "./supabaseClient";
 
 const FONT_IMPORT_ID = "plantoes-fonts";
 const TABLE = "entries";
+const CACHE_KEY = "plantoes-cache";
+const QUEUE_KEY = "plantoes-offline-queue";
+
+// Cópia local dos registros, usada para abrir o app sem internet.
+function loadCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCache(entries) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(entries));
+  } catch {
+    // localStorage indisponível/cheio — cache é best-effort, ignora
+  }
+}
+
+// Fila de alterações feitas offline, sincronizadas quando a conexão volta.
+function loadQueue() {
+  try {
+    const raw = localStorage.getItem(QUEUE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveQueue(queue) {
+  try {
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+  } catch {
+    // ignore
+  }
+}
 
 // Converte uma linha da tabela `entries` (Supabase) no formato de registro
 // que o resto do componente já usa (camelCase, sem colunas nulas do outro tipo).
@@ -783,6 +821,95 @@ export default function PlantoesApp() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [undo]);
 
+  // Modo offline: mantém uma cópia local dos registros e uma fila de
+  // alterações que não conseguiram ser enviadas ao Supabase, para sincronizar
+  // sozinho quando a conexão voltar.
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(() => loadQueue().length);
+
+  const enqueueOffline = useCallback((op) => {
+    const queue = [...loadQueue(), op];
+    saveQueue(queue);
+    setPendingCount(queue.length);
+  }, []);
+
+  // Tenta a operação no Supabase; se não houver internet ou a rede falhar,
+  // guarda na fila offline em vez de mostrar erro.
+  const runOrQueue = useCallback(
+    async (onlineOp, queueOp) => {
+      if (!navigator.onLine) {
+        enqueueOffline(queueOp);
+        return { status: "queued" };
+      }
+      try {
+        const { error } = await onlineOp();
+        if (error) return { status: "error", error };
+        return { status: "ok" };
+      } catch {
+        // fetch lança exceção em falha real de rede (offline, DNS etc.)
+        enqueueOffline(queueOp);
+        return { status: "queued" };
+      }
+    },
+    [enqueueOffline]
+  );
+
+  const flushOfflineQueue = useCallback(async () => {
+    let queue = loadQueue();
+    if (queue.length === 0) return;
+    while (queue.length > 0) {
+      const op = queue[0];
+      try {
+        const { error } =
+          op.kind === "delete"
+            ? await supabase.from(TABLE).delete().eq("id", op.row.id)
+            : await supabase.from(TABLE).upsert(op.row);
+        if (error) throw error;
+        queue = queue.slice(1);
+        saveQueue(queue);
+        setPendingCount(queue.length);
+      } catch {
+        break;
+      }
+    }
+    if (queue.length === 0) {
+      const { data, error } = await supabase.from(TABLE).select("*");
+      if (!error && data) {
+        const next = rowsToEntries(data);
+        setEntries(next);
+        saveCache(next);
+      }
+      showToast("Sincronizado", "success");
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    function handleOnline() {
+      setIsOnline(true);
+      if (loadQueue().length > 0) {
+        showToast("Conectado — sincronizando alterações…", "success");
+        flushOfflineQueue();
+      }
+    }
+    function handleOffline() {
+      setIsOnline(false);
+      showToast("Sem conexão — as alterações serão salvas localmente", "error");
+    }
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, [flushOfflineQueue, showToast]);
+
+  // Salva uma cópia local sempre que os registros mudam (depois do carregamento
+  // inicial), para o app conseguir abrir com os últimos dados mesmo sem internet.
+  useEffect(() => {
+    if (loading) return;
+    saveCache(entries);
+  }, [entries, loading]);
+
   // Carrega os registros do Supabase e assina atualizações em tempo real,
   // para que mudanças feitas em outro dispositivo apareçam sem recarregar a página.
   useEffect(() => {
@@ -796,15 +923,26 @@ export default function PlantoesApp() {
     let cancelled = false;
 
     (async () => {
-      const { data, error } = await supabase.from(TABLE).select("*");
-      if (cancelled) return;
-      if (error) {
-        setSaveError(true);
-        showToast("Não foi possível carregar os dados", "error");
-      } else {
-        setEntries(rowsToEntries(data));
+      try {
+        if (!navigator.onLine) throw new Error("offline");
+        const { data, error } = await supabase.from(TABLE).select("*");
+        if (cancelled) return;
+        if (error) throw error;
+        const next = rowsToEntries(data);
+        setEntries(next);
+        saveCache(next);
+      } catch {
+        if (cancelled) return;
+        const cached = loadCache();
+        setEntries(cached);
+        showToast(
+          Object.keys(cached).length > 0
+            ? "Sem conexão — mostrando dados salvos localmente"
+            : "Sem conexão e sem dados salvos localmente ainda",
+          "error"
+        );
       }
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     })();
 
     const removeFromAllDays = (obj, id) => {
@@ -1002,27 +1140,40 @@ export default function PlantoesApp() {
       updated[idx] = { ...updated[idx], pago: novoPago };
       return { ...prev, [result.dayKey]: updated };
     });
-    const { error } = await supabase.from(TABLE).update({ pago: novoPago }).eq("id", result.id);
-    if (error) {
+    const outcome = await runOrQueue(
+      () => supabase.from(TABLE).update({ pago: novoPago }).eq("id", result.id),
+      { kind: "upsert", row: entryToRow(result.dayKey, { ...result, pago: novoPago }) }
+    );
+    if (outcome.status === "error") {
       setSaveError(true);
       showToast("Não foi possível salvar", "error");
-    } else {
-      showToast(novoPago ? "Marcado como pago" : "Marcado como a receber", "success");
-      pushUndo({
-        label: "Status de pagamento restaurado",
-        run: async () => {
-          setEntries((prev) => {
-            const list = prev[result.dayKey] || [];
-            const idx = list.findIndex((e) => e.id === result.id);
-            if (idx === -1) return prev;
-            const updated = [...list];
-            updated[idx] = { ...updated[idx], pago: result.pago };
-            return { ...prev, [result.dayKey]: updated };
-          });
-          await supabase.from(TABLE).update({ pago: result.pago }).eq("id", result.id);
-        },
-      });
+      return;
     }
+    showToast(
+      outcome.status === "queued"
+        ? "Salvo offline — sincroniza quando reconectar"
+        : novoPago
+        ? "Marcado como pago"
+        : "Marcado como a receber",
+      "success"
+    );
+    pushUndo({
+      label: "Status de pagamento restaurado",
+      run: async () => {
+        setEntries((prev) => {
+          const list = prev[result.dayKey] || [];
+          const idx = list.findIndex((e) => e.id === result.id);
+          if (idx === -1) return prev;
+          const updated = [...list];
+          updated[idx] = { ...updated[idx], pago: result.pago };
+          return { ...prev, [result.dayKey]: updated };
+        });
+        await runOrQueue(
+          () => supabase.from(TABLE).update({ pago: result.pago }).eq("id", result.id),
+          { kind: "upsert", row: entryToRow(result.dayKey, { ...result, pago: result.pago }) }
+        );
+      },
+    });
   };
 
   const toggleExportCol = (key) => {
@@ -1297,26 +1448,37 @@ export default function PlantoesApp() {
     const targetDay = duplicateTargetDay;
     closeModal();
 
-    const { error } = await supabase.from(TABLE).insert(entryToRow(targetDay, copy));
-    if (error) {
+    const outcome = await runOrQueue(
+      () => supabase.from(TABLE).insert(entryToRow(targetDay, copy)),
+      { kind: "upsert", row: entryToRow(targetDay, copy) }
+    );
+    if (outcome.status === "error") {
       setSaveError(true);
       showToast("Não foi possível duplicar", "error");
-    } else {
-      showToast(`Duplicado para ${formatShort(targetDay)}`, "success");
-      pushUndo({
-        label: "Duplicação desfeita",
-        run: async () => {
-          setEntries((prev) => {
-            const list = (prev[targetDay] || []).filter((e) => e.id !== copy.id);
-            const next = { ...prev };
-            if (list.length) next[targetDay] = list;
-            else delete next[targetDay];
-            return next;
-          });
-          await supabase.from(TABLE).delete().eq("id", copy.id);
-        },
-      });
+      return;
     }
+    showToast(
+      outcome.status === "queued"
+        ? `Duplicado offline para ${formatShort(targetDay)} — sincroniza quando reconectar`
+        : `Duplicado para ${formatShort(targetDay)}`,
+      "success"
+    );
+    pushUndo({
+      label: "Duplicação desfeita",
+      run: async () => {
+        setEntries((prev) => {
+          const list = (prev[targetDay] || []).filter((e) => e.id !== copy.id);
+          const next = { ...prev };
+          if (list.length) next[targetDay] = list;
+          else delete next[targetDay];
+          return next;
+        });
+        await runOrQueue(
+          () => supabase.from(TABLE).delete().eq("id", copy.id),
+          { kind: "delete", row: { id: copy.id } }
+        );
+      },
+    });
   };
 
   const handleSave = async () => {
@@ -1400,38 +1562,54 @@ export default function PlantoesApp() {
     });
     closeModal();
 
-    const { error } = await supabase.from(TABLE).upsert(entryToRow(day, record));
-    if (error) {
+    const outcome = await runOrQueue(
+      () => supabase.from(TABLE).upsert(entryToRow(day, record)),
+      { kind: "upsert", row: entryToRow(day, record) }
+    );
+    if (outcome.status === "error") {
       setSaveError(true);
       showToast("Não foi possível salvar", "error");
+      return;
+    }
+    showToast(
+      outcome.status === "queued"
+        ? "Salvo offline — sincroniza quando reconectar"
+        : wasEditing
+        ? "Alterações salvas"
+        : "Registro salvo",
+      "success"
+    );
+    if (wasEditing && original) {
+      pushUndo({
+        label: "Edição desfeita",
+        run: async () => {
+          setEntries((prev) => {
+            const list = (prev[day] || []).map((e) => (e.id === original.id ? original : e));
+            return { ...prev, [day]: list };
+          });
+          await runOrQueue(
+            () => supabase.from(TABLE).upsert(entryToRow(day, original)),
+            { kind: "upsert", row: entryToRow(day, original) }
+          );
+        },
+      });
     } else {
-      showToast(wasEditing ? "Alterações salvas" : "Registro salvo", "success");
-      if (wasEditing && original) {
-        pushUndo({
-          label: "Edição desfeita",
-          run: async () => {
-            setEntries((prev) => {
-              const list = (prev[day] || []).map((e) => (e.id === original.id ? original : e));
-              return { ...prev, [day]: list };
-            });
-            await supabase.from(TABLE).upsert(entryToRow(day, original));
-          },
-        });
-      } else {
-        pushUndo({
-          label: "Criação desfeita",
-          run: async () => {
-            setEntries((prev) => {
-              const list = (prev[day] || []).filter((e) => e.id !== record.id);
-              const next = { ...prev };
-              if (list.length) next[day] = list;
-              else delete next[day];
-              return next;
-            });
-            await supabase.from(TABLE).delete().eq("id", record.id);
-          },
-        });
-      }
+      pushUndo({
+        label: "Criação desfeita",
+        run: async () => {
+          setEntries((prev) => {
+            const list = (prev[day] || []).filter((e) => e.id !== record.id);
+            const next = { ...prev };
+            if (list.length) next[day] = list;
+            else delete next[day];
+            return next;
+          });
+          await runOrQueue(
+            () => supabase.from(TABLE).delete().eq("id", record.id),
+            { kind: "delete", row: { id: record.id } }
+          );
+        },
+      });
     }
   };
 
@@ -1453,24 +1631,33 @@ export default function PlantoesApp() {
     });
     closeModal();
 
-    const { error } = await supabase.from(TABLE).delete().eq("id", idToDelete);
-    if (error) {
+    const outcome = await runOrQueue(
+      () => supabase.from(TABLE).delete().eq("id", idToDelete),
+      { kind: "delete", row: { id: idToDelete } }
+    );
+    if (outcome.status === "error") {
       setSaveError(true);
       showToast("Não foi possível excluir", "error");
-    } else {
-      showToast("Registro excluído", "success");
-      if (deletedEntry) {
-        pushUndo({
-          label: "Exclusão desfeita",
-          run: async () => {
-            setEntries((prev) => {
-              const list = prev[day] ? [...prev[day]] : [];
-              return { ...prev, [day]: [...list, deletedEntry] };
-            });
-            await supabase.from(TABLE).insert(entryToRow(day, deletedEntry));
-          },
-        });
-      }
+      return;
+    }
+    showToast(
+      outcome.status === "queued" ? "Excluído offline — sincroniza quando reconectar" : "Registro excluído",
+      "success"
+    );
+    if (deletedEntry) {
+      pushUndo({
+        label: "Exclusão desfeita",
+        run: async () => {
+          setEntries((prev) => {
+            const list = prev[day] ? [...prev[day]] : [];
+            return { ...prev, [day]: [...list, deletedEntry] };
+          });
+          await runOrQueue(
+            () => supabase.from(TABLE).insert(entryToRow(day, deletedEntry)),
+            { kind: "upsert", row: entryToRow(day, deletedEntry) }
+          );
+        },
+      });
     }
   };
 
@@ -1480,6 +1667,7 @@ export default function PlantoesApp() {
       showToast("Supabase não configurado", "error");
       return;
     }
+    const movedEntry = (entries[fromDay] || []).find((e) => e.id === id);
     setEntries((prev) => {
       const fromList = prev[fromDay] || [];
       const entry = fromList.find((e) => e.id === id);
@@ -1494,32 +1682,41 @@ export default function PlantoesApp() {
       return next;
     });
 
-    const { error } = await supabase.from(TABLE).update({ day_key: toDay }).eq("id", id);
-    if (error) {
+    const outcome = await runOrQueue(
+      () => supabase.from(TABLE).update({ day_key: toDay }).eq("id", id),
+      { kind: "upsert", row: entryToRow(toDay, movedEntry || { id }) }
+    );
+    if (outcome.status === "error") {
       setSaveError(true);
       showToast("Não foi possível salvar", "error");
-    } else {
-      showToast("Movido para outra data", "success");
-      pushUndo({
-        label: "Movimentação desfeita",
-        run: async () => {
-          setEntries((prev) => {
-            const fromList = prev[toDay] || [];
-            const entry = fromList.find((e) => e.id === id);
-            if (!entry) return prev;
-            const newFromList = fromList.filter((e) => e.id !== id);
-            const toList = prev[fromDay] ? [...prev[fromDay]] : [];
-            toList.push(entry);
-            const next = { ...prev };
-            if (newFromList.length) next[toDay] = newFromList;
-            else delete next[toDay];
-            next[fromDay] = toList;
-            return next;
-          });
-          await supabase.from(TABLE).update({ day_key: fromDay }).eq("id", id);
-        },
-      });
+      return;
     }
+    showToast(
+      outcome.status === "queued" ? "Movido offline — sincroniza quando reconectar" : "Movido para outra data",
+      "success"
+    );
+    pushUndo({
+      label: "Movimentação desfeita",
+      run: async () => {
+        setEntries((prev) => {
+          const fromList = prev[toDay] || [];
+          const entry = fromList.find((e) => e.id === id);
+          if (!entry) return prev;
+          const newFromList = fromList.filter((e) => e.id !== id);
+          const toList = prev[fromDay] ? [...prev[fromDay]] : [];
+          toList.push(entry);
+          const next = { ...prev };
+          if (newFromList.length) next[toDay] = newFromList;
+          else delete next[toDay];
+          next[fromDay] = toList;
+          return next;
+        });
+        await runOrQueue(
+          () => supabase.from(TABLE).update({ day_key: fromDay }).eq("id", id),
+          { kind: "upsert", row: entryToRow(fromDay, movedEntry || { id }) }
+        );
+      },
+    });
   };
 
   const isValid =
@@ -1547,6 +1744,12 @@ export default function PlantoesApp() {
               <div style={styles.brandSub}>controle de escala &amp; financeiro</div>
             </div>
           </div>
+          {!isOnline && (
+            <div style={styles.offlineWarning}>
+              <Circle size={8} fill="#8C6D1B" />
+              offline{pendingCount > 0 ? ` — ${pendingCount} pendente${pendingCount > 1 ? "s" : ""}` : ""}
+            </div>
+          )}
           {saveError && (
             <div style={styles.saveWarning}>não foi possível salvar</div>
           )}
@@ -2960,6 +3163,17 @@ const styles = {
     fontSize: 11,
     color: "#B5541F",
     background: "#F5E6DC",
+    padding: "4px 8px",
+    borderRadius: 6,
+  },
+  offlineWarning: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#8C6D1B",
+    background: "#F6EFDD",
     padding: "4px 8px",
     borderRadius: 6,
   },
