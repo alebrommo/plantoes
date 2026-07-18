@@ -25,6 +25,9 @@ import {
   Presentation,
   Copy,
   BarChart3,
+  Mail,
+  Lock,
+  LogOut,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -34,36 +37,42 @@ const CACHE_KEY = "plantoes-cache";
 const QUEUE_KEY = "plantoes-offline-queue";
 
 // Cópia local dos registros, usada para abrir o app sem internet.
-function loadCache() {
+// Cache e fila são separados por usuário (uid), para um computador
+// compartilhado não misturar dados de contas diferentes.
+function loadCache(uid) {
+  if (!uid) return {};
   try {
-    const raw = localStorage.getItem(CACHE_KEY);
+    const raw = localStorage.getItem(`${CACHE_KEY}-${uid}`);
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
 }
 
-function saveCache(entries) {
+function saveCache(uid, entries) {
+  if (!uid) return;
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(entries));
+    localStorage.setItem(`${CACHE_KEY}-${uid}`, JSON.stringify(entries));
   } catch {
     // localStorage indisponível/cheio — cache é best-effort, ignora
   }
 }
 
 // Fila de alterações feitas offline, sincronizadas quando a conexão volta.
-function loadQueue() {
+function loadQueue(uid) {
+  if (!uid) return [];
   try {
-    const raw = localStorage.getItem(QUEUE_KEY);
+    const raw = localStorage.getItem(`${QUEUE_KEY}-${uid}`);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-function saveQueue(queue) {
+function saveQueue(uid, queue) {
+  if (!uid) return;
   try {
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+    localStorage.setItem(`${QUEUE_KEY}-${uid}`, JSON.stringify(queue));
   } catch {
     // ignore
   }
@@ -113,10 +122,11 @@ function rowToEntry(row) {
 }
 
 // Converte um registro local + dia em uma linha pronta para gravar no Supabase.
-function entryToRow(dayKey, entry) {
+function entryToRow(dayKey, entry, userId) {
   return {
     id: entry.id,
     day_key: dayKey,
+    user_id: userId,
     type: entry.type,
     value: entry.value,
     color: entry.color,
@@ -721,6 +731,32 @@ function buildSearchPdfBlob(results, colsSelected) {
 }
 
 export default function PlantoesApp() {
+  // undefined = ainda verificando; null = sem sessão; objeto = logado
+  const [session, setSession] = useState(undefined);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const userId = session?.user?.id ?? null;
+
+  useEffect(() => {
+    if (!supabaseConfigured) {
+      setSession(null);
+      return;
+    }
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (mounted) setSession(data.session ?? null);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
+      setSession(newSession);
+      if (event === "PASSWORD_RECOVERY") {
+        setPasswordRecovery(true);
+      }
+    });
+    return () => {
+      mounted = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
   const [entries, setEntries] = useState({});
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState(false);
@@ -826,13 +862,20 @@ export default function PlantoesApp() {
   // alterações que não conseguiram ser enviadas ao Supabase, para sincronizar
   // sozinho quando a conexão voltar.
   const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [pendingCount, setPendingCount] = useState(() => loadQueue().length);
+  const [pendingCount, setPendingCount] = useState(0);
 
-  const enqueueOffline = useCallback((op) => {
-    const queue = [...loadQueue(), op];
-    saveQueue(queue);
-    setPendingCount(queue.length);
-  }, []);
+  useEffect(() => {
+    setPendingCount(loadQueue(userId).length);
+  }, [userId]);
+
+  const enqueueOffline = useCallback(
+    (op) => {
+      const queue = [...loadQueue(userId), op];
+      saveQueue(userId, queue);
+      setPendingCount(queue.length);
+    },
+    [userId]
+  );
 
   // Tenta a operação no Supabase; se não houver internet ou a rede falhar,
   // guarda na fila offline em vez de mostrar erro.
@@ -856,7 +899,8 @@ export default function PlantoesApp() {
   );
 
   const flushOfflineQueue = useCallback(async () => {
-    let queue = loadQueue();
+    if (!userId) return;
+    let queue = loadQueue(userId);
     if (queue.length === 0) return;
     while (queue.length > 0) {
       const op = queue[0];
@@ -867,7 +911,7 @@ export default function PlantoesApp() {
             : await supabase.from(TABLE).upsert(op.row);
         if (error) throw error;
         queue = queue.slice(1);
-        saveQueue(queue);
+        saveQueue(userId, queue);
         setPendingCount(queue.length);
       } catch {
         break;
@@ -878,16 +922,16 @@ export default function PlantoesApp() {
       if (!error && data) {
         const next = rowsToEntries(data);
         setEntries(next);
-        saveCache(next);
+        saveCache(userId, next);
       }
       showToast("Sincronizado", "success");
     }
-  }, [showToast]);
+  }, [showToast, userId]);
 
   useEffect(() => {
     function handleOnline() {
       setIsOnline(true);
-      if (loadQueue().length > 0) {
+      if (loadQueue(userId).length > 0) {
         showToast("Conectado — sincronizando alterações…", "success");
         flushOfflineQueue();
       }
@@ -902,14 +946,14 @@ export default function PlantoesApp() {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [flushOfflineQueue, showToast]);
+  }, [flushOfflineQueue, showToast, userId]);
 
   // Salva uma cópia local sempre que os registros mudam (depois do carregamento
   // inicial), para o app conseguir abrir com os últimos dados mesmo sem internet.
   useEffect(() => {
-    if (loading) return;
-    saveCache(entries);
-  }, [entries, loading]);
+    if (loading || !userId) return;
+    saveCache(userId, entries);
+  }, [entries, loading, userId]);
 
   // Carrega os registros do Supabase e assina atualizações em tempo real,
   // para que mudanças feitas em outro dispositivo apareçam sem recarregar a página.
@@ -920,8 +964,15 @@ export default function PlantoesApp() {
       showToast("Supabase não configurado (veja .env.example)", "error");
       return;
     }
+    if (!userId) {
+      // Sem sessão: nada pra carregar (tela de login é exibida em vez do app).
+      setEntries({});
+      setLoading(false);
+      return;
+    }
 
     let cancelled = false;
+    setLoading(true);
 
     (async () => {
       try {
@@ -931,10 +982,10 @@ export default function PlantoesApp() {
         if (error) throw error;
         const next = rowsToEntries(data);
         setEntries(next);
-        saveCache(next);
+        saveCache(userId, next);
       } catch {
         if (cancelled) return;
-        const cached = loadCache();
+        const cached = loadCache(userId);
         setEntries(cached);
         showToast(
           Object.keys(cached).length > 0
@@ -980,7 +1031,7 @@ export default function PlantoesApp() {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [showToast]);
+  }, [showToast, userId]);
 
   const daysGrid = useMemo(() => {
     const { year, month } = cursor;
@@ -1230,7 +1281,7 @@ export default function PlantoesApp() {
     });
     const outcome = await runOrQueue(
       () => supabase.from(TABLE).update({ pago: novoPago }).eq("id", result.id),
-      { kind: "upsert", row: entryToRow(result.dayKey, { ...result, pago: novoPago }) }
+      { kind: "upsert", row: entryToRow(result.dayKey, { ...result, pago: novoPago }, userId) }
     );
     if (outcome.status === "error") {
       setSaveError(true);
@@ -1258,7 +1309,7 @@ export default function PlantoesApp() {
         });
         await runOrQueue(
           () => supabase.from(TABLE).update({ pago: result.pago }).eq("id", result.id),
-          { kind: "upsert", row: entryToRow(result.dayKey, { ...result, pago: result.pago }) }
+          { kind: "upsert", row: entryToRow(result.dayKey, { ...result, pago: result.pago }, userId) }
         );
       },
     });
@@ -1537,8 +1588,8 @@ export default function PlantoesApp() {
     closeModal();
 
     const outcome = await runOrQueue(
-      () => supabase.from(TABLE).insert(entryToRow(targetDay, copy)),
-      { kind: "upsert", row: entryToRow(targetDay, copy) }
+      () => supabase.from(TABLE).insert(entryToRow(targetDay, copy, userId)),
+      { kind: "upsert", row: entryToRow(targetDay, copy, userId) }
     );
     if (outcome.status === "error") {
       setSaveError(true);
@@ -1651,8 +1702,8 @@ export default function PlantoesApp() {
     closeModal();
 
     const outcome = await runOrQueue(
-      () => supabase.from(TABLE).upsert(entryToRow(day, record)),
-      { kind: "upsert", row: entryToRow(day, record) }
+      () => supabase.from(TABLE).upsert(entryToRow(day, record, userId)),
+      { kind: "upsert", row: entryToRow(day, record, userId) }
     );
     if (outcome.status === "error") {
       setSaveError(true);
@@ -1676,8 +1727,8 @@ export default function PlantoesApp() {
             return { ...prev, [day]: list };
           });
           await runOrQueue(
-            () => supabase.from(TABLE).upsert(entryToRow(day, original)),
-            { kind: "upsert", row: entryToRow(day, original) }
+            () => supabase.from(TABLE).upsert(entryToRow(day, original, userId)),
+            { kind: "upsert", row: entryToRow(day, original, userId) }
           );
         },
       });
@@ -1741,8 +1792,8 @@ export default function PlantoesApp() {
             return { ...prev, [day]: [...list, deletedEntry] };
           });
           await runOrQueue(
-            () => supabase.from(TABLE).insert(entryToRow(day, deletedEntry)),
-            { kind: "upsert", row: entryToRow(day, deletedEntry) }
+            () => supabase.from(TABLE).insert(entryToRow(day, deletedEntry, userId)),
+            { kind: "upsert", row: entryToRow(day, deletedEntry, userId) }
           );
         },
       });
@@ -1772,7 +1823,7 @@ export default function PlantoesApp() {
 
     const outcome = await runOrQueue(
       () => supabase.from(TABLE).update({ day_key: toDay }).eq("id", id),
-      { kind: "upsert", row: entryToRow(toDay, movedEntry || { id }) }
+      { kind: "upsert", row: entryToRow(toDay, movedEntry || { id }, userId) }
     );
     if (outcome.status === "error") {
       setSaveError(true);
@@ -1801,7 +1852,7 @@ export default function PlantoesApp() {
         });
         await runOrQueue(
           () => supabase.from(TABLE).update({ day_key: fromDay }).eq("id", id),
-          { kind: "upsert", row: entryToRow(fromDay, movedEntry || { id }) }
+          { kind: "upsert", row: entryToRow(fromDay, movedEntry || { id }, userId) }
         );
       },
     });
@@ -1816,6 +1867,36 @@ export default function PlantoesApp() {
       ? form.local.trim() && form.empresa.trim()
       : form.empresa.trim());
 
+  if (session === undefined) {
+    return (
+      <div style={styles.authScreen}>
+        <style>{globalCss}</style>
+        <div style={styles.loadingBox}>
+          <Loader2 size={22} className="spin" />
+          <span>verificando sessão…</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (passwordRecovery) {
+    return (
+      <>
+        <style>{globalCss}</style>
+        <ResetPasswordScreen showToast={showToast} onDone={() => setPasswordRecovery(false)} />
+      </>
+    );
+  }
+
+  if (!session) {
+    return (
+      <>
+        <style>{globalCss}</style>
+        <AuthScreen showToast={showToast} />
+      </>
+    );
+  }
+
   return (
     <>
     <div style={styles.app} className="app-main">
@@ -1824,9 +1905,7 @@ export default function PlantoesApp() {
       <header style={styles.header}>
         <div style={styles.headerTop}>
           <div style={styles.brand}>
-            <div style={styles.brandMark}>
-              <Stethoscope size={18} color="#F7F5F0" strokeWidth={2.2} />
-            </div>
+            <Logo size={34} />
             <div>
               <div style={styles.brandTitle}>Plantões</div>
               <div style={styles.brandSub}>controle de escala &amp; financeiro</div>
@@ -1841,6 +1920,15 @@ export default function PlantoesApp() {
           {saveError && (
             <div style={styles.saveWarning}>não foi possível salvar</div>
           )}
+          <button
+            className="btn-lift"
+            style={styles.logoutBtn}
+            onClick={() => supabase.auth.signOut()}
+            title={session?.user?.email}
+          >
+            <LogOut size={13} />
+            sair
+          </button>
         </div>
 
         <div style={styles.tabRow}>
@@ -2988,6 +3076,259 @@ function Field({ icon, label, children }) {
   );
 }
 
+function Logo({ size = 40 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 120 120"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="Logotipo Plantões"
+    >
+      <rect x="4" y="4" width="112" height="112" rx="28" fill="#1C2B39" />
+      <polyline
+        points="18,60 34,60 40,50 46,70 52,26 58,88 64,60 102,60"
+        fill="none"
+        stroke="#F7F5F0"
+        strokeWidth="6"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <circle cx="102" cy="60" r="6" fill="#2D6E6E" />
+    </svg>
+  );
+}
+
+function AuthScreen({ showToast }) {
+  const [mode, setMode] = useState("login"); // "login" | "signup" | "forgot"
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [info, setInfo] = useState("");
+
+  const switchMode = (next) => {
+    setMode(next);
+    setInfo("");
+  };
+
+  const handleSubmit = async (evt) => {
+    evt.preventDefault();
+    if (!supabaseConfigured) {
+      showToast("Supabase não configurado", "error");
+      return;
+    }
+    if (!email.trim()) {
+      showToast("Preencha o e-mail", "error");
+      return;
+    }
+    if (mode !== "forgot" && !password) {
+      showToast("Preencha a senha", "error");
+      return;
+    }
+    if (mode === "signup" && password.length < 6) {
+      showToast("A senha precisa ter pelo menos 6 caracteres", "error");
+      return;
+    }
+    setSubmitting(true);
+    setInfo("");
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (error) throw error;
+      } else if (mode === "signup") {
+        const { error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+        });
+        if (error) throw error;
+        setInfo("Conta criada! Se pedir confirmação, verifique seu e-mail antes de entrar.");
+      } else {
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+          redirectTo: window.location.origin,
+        });
+        if (error) throw error;
+        setInfo("Link de recuperação enviado! Confira seu e-mail (e a caixa de spam).");
+      }
+    } catch (err) {
+      showToast(err.message || "Não foi possível continuar", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={styles.authScreen}>
+      <div style={styles.authCard}>
+        <div style={styles.authLogoWrap}>
+          <Logo size={64} />
+        </div>
+        <h1 style={styles.authTitle}>Plantões</h1>
+        <p style={styles.authSubtitle}>controle de escala &amp; financeiro</p>
+
+        {mode !== "forgot" && (
+          <div style={styles.typeToggle}>
+            <button
+              type="button"
+              className="btn-lift"
+              style={{
+                ...styles.typeBtn,
+                ...(mode === "login" ? styles.typeBtnActivePlantao : {}),
+              }}
+              onClick={() => switchMode("login")}
+            >
+              Entrar
+            </button>
+            <button
+              type="button"
+              className="btn-lift"
+              style={{
+                ...styles.typeBtn,
+                ...(mode === "signup" ? styles.typeBtnActiveEvento : {}),
+              }}
+              onClick={() => switchMode("signup")}
+            >
+              Criar conta
+            </button>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} style={styles.authForm}>
+          <Field icon={<Mail size={14} />} label="E-mail">
+            <input
+              type="email"
+              autoComplete="email"
+              style={styles.input}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="seuemail@exemplo.com"
+            />
+          </Field>
+
+          {mode !== "forgot" && (
+            <Field icon={<Lock size={14} />} label="Senha">
+              <input
+                type="password"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                style={styles.input}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="mínimo 6 caracteres"
+              />
+            </Field>
+          )}
+
+          {mode === "login" && (
+            <button type="button" style={styles.authForgotLink} onClick={() => switchMode("forgot")}>
+              Esqueci minha senha
+            </button>
+          )}
+
+          {info && <p style={styles.authInfo}>{info}</p>}
+
+          <button
+            type="submit"
+            className="btn-lift"
+            style={{ ...styles.saveBtn, ...styles.authSubmitBtn, opacity: submitting ? 0.7 : 1 }}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <Loader2 size={15} className="spin" />
+            ) : mode === "login" ? (
+              "Entrar"
+            ) : mode === "signup" ? (
+              "Criar conta"
+            ) : (
+              "Enviar link de recuperação"
+            )}
+          </button>
+
+          {mode === "forgot" && (
+            <button type="button" style={styles.authForgotLink} onClick={() => switchMode("login")}>
+              Voltar para o login
+            </button>
+          )}
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordScreen({ showToast, onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (evt) => {
+    evt.preventDefault();
+    if (password.length < 6) {
+      showToast("A senha precisa ter pelo menos 6 caracteres", "error");
+      return;
+    }
+    if (password !== confirm) {
+      showToast("As senhas não coincidem", "error");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      showToast("Senha atualizada!", "success");
+      onDone();
+    } catch (err) {
+      showToast(err.message || "Não foi possível atualizar a senha", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={styles.authScreen}>
+      <div style={styles.authCard}>
+        <div style={styles.authLogoWrap}>
+          <Logo size={64} />
+        </div>
+        <h1 style={styles.authTitle}>Nova senha</h1>
+        <p style={styles.authSubtitle}>Escolha uma nova senha para sua conta</p>
+        <form onSubmit={handleSubmit} style={styles.authForm}>
+          <Field icon={<Lock size={14} />} label="Nova senha">
+            <input
+              type="password"
+              autoComplete="new-password"
+              style={styles.input}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="mínimo 6 caracteres"
+            />
+          </Field>
+          <Field icon={<Lock size={14} />} label="Confirmar nova senha">
+            <input
+              type="password"
+              autoComplete="new-password"
+              style={styles.input}
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="repita a senha"
+            />
+          </Field>
+          <button
+            type="submit"
+            className="btn-lift"
+            style={{ ...styles.saveBtn, ...styles.authSubmitBtn, opacity: submitting ? 0.7 : 1 }}
+            disabled={submitting}
+          >
+            {submitting ? <Loader2 size={15} className="spin" /> : "Salvar nova senha"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function formatFullDate(dayKey) {
   if (!dayKey) return "";
   const [y, m, d] = dayKey.split("-").map(Number);
@@ -3529,6 +3870,86 @@ const styles = {
     padding: 60,
     color: "#5B6B75",
     fontSize: 13,
+  },
+  authScreen: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#F7F5F0",
+    padding: 20,
+    fontFamily: "'Inter', -apple-system, sans-serif",
+  },
+  authCard: {
+    background: "#FFFDF9",
+    borderRadius: 16,
+    padding: "32px 28px",
+    width: "100%",
+    maxWidth: 380,
+    boxShadow: "0 10px 30px rgba(28,43,57,0.12)",
+  },
+  authLogoWrap: {
+    display: "flex",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  authTitle: {
+    fontFamily: "'Space Grotesk', sans-serif",
+    fontWeight: 700,
+    fontSize: 24,
+    color: "#1C2B39",
+    margin: "0 0 4px",
+    textAlign: "center",
+  },
+  authSubtitle: {
+    fontSize: 13,
+    color: "#5B6B75",
+    margin: "0 0 24px",
+    textAlign: "center",
+  },
+  authForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    marginTop: 20,
+  },
+  authInfo: {
+    fontSize: 12.5,
+    color: "#206B3C",
+    background: "#E2F2E7",
+    borderRadius: 8,
+    padding: "8px 10px",
+    marginBottom: 4,
+  },
+  authSubmitBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    padding: "10px 16px",
+    marginTop: 8,
+  },
+  authForgotLink: {
+    border: "none",
+    background: "transparent",
+    color: "#5B6B75",
+    fontSize: 12,
+    textDecoration: "underline",
+    cursor: "pointer",
+    padding: "4px 0",
+    textAlign: "center",
+  },
+  logoutBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    border: "1px solid #E0DDD3",
+    background: "#fff",
+    borderRadius: 8,
+    padding: "6px 10px",
+    fontSize: 12,
+    cursor: "pointer",
+    color: "#5B6B75",
   },
   weekHeader: {
     display: "grid",
