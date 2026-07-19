@@ -2471,14 +2471,15 @@ export default function PlantoesApp() {
               const list = entries[dayKey] || [];
               const isToday = dayKey === todayKey();
               const isDragOver = dragOverDay === dayKey;
+              const isSelected = dayKey === viewDay;
               return (
                 <div
-                  key={i}
+                  key={`${i}-${isSelected}`}
                   className="cal-cell"
                   style={{
                     ...styles.cell,
                     ...(isToday ? styles.cellToday : {}),
-                    ...(dayKey === viewDay ? styles.cellSelected : {}),
+                    ...(isSelected ? styles.cellSelected : {}),
                     ...(isDragOver ? styles.cellDragOver : {}),
                   }}
                   onClick={() => setViewDay((prev) => (prev === dayKey ? null : dayKey))}
