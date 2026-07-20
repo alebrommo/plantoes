@@ -41,6 +41,12 @@ import {
   Mail,
   Lock,
   LogOut,
+  Bold,
+  Italic,
+  List,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -209,6 +215,62 @@ function ColorGrid({ options, value, onChange }) {
           }}
         />
       ))}
+    </div>
+  );
+}
+
+function stripHtml(html) {
+  if (!html) return "";
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return div.textContent || "";
+}
+
+function RichTextEditor({ value, onChange, placeholder }) {
+  const ref = useRef(null);
+
+  const exec = (cmd) => {
+    if (ref.current) ref.current.focus();
+    document.execCommand(cmd);
+    if (ref.current) onChange(ref.current.innerHTML);
+  };
+
+  const isEmpty = !value || value === "<br>";
+
+  return (
+    <div style={styles.richWrap}>
+      <div style={styles.richToolbar}>
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("bold"); }} title="Negrito">
+          <Bold size={13} />
+        </button>
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("italic"); }} title="Itálico">
+          <Italic size={13} />
+        </button>
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("insertUnorderedList"); }} title="Tópicos">
+          <List size={13} />
+        </button>
+        <span style={styles.richToolbarDivider} />
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("justifyLeft"); }} title="Alinhar à esquerda">
+          <AlignLeft size={13} />
+        </button>
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("justifyCenter"); }} title="Centralizar">
+          <AlignCenter size={13} />
+        </button>
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("justifyRight"); }} title="Alinhar à direita">
+          <AlignRight size={13} />
+        </button>
+      </div>
+      <div style={{ position: "relative" }}>
+        {isEmpty && <span style={styles.richPlaceholder}>{placeholder}</span>}
+        <div
+          ref={ref}
+          contentEditable
+          suppressContentEditableWarning
+          style={styles.richEditable}
+          dangerouslySetInnerHTML={{ __html: value || "" }}
+          onInput={(e) => onChange(e.currentTarget.innerHTML)}
+        />
+      </div>
     </div>
   );
 }
@@ -1173,7 +1235,7 @@ export default function PlantoesApp() {
                 e.paciente,
                 e.origem,
                 e.destino,
-                e.obs,
+                stripHtml(e.obs),
               ]
                 .filter(Boolean)
                 .join(" ")
@@ -2824,10 +2886,9 @@ export default function PlantoesApp() {
               </label>
 
               <Field icon={<StickyNote size={14} />} label="Observações (opcional)">
-                <textarea
-                  style={{ ...styles.input, minHeight: 60, resize: "vertical" }}
+                <RichTextEditor
                   value={form.obs}
-                  onChange={(e) => setForm((f) => ({ ...f, obs: e.target.value }))}
+                  onChange={(html) => setForm((f) => ({ ...f, obs: html }))}
                   placeholder="notas adicionais"
                 />
               </Field>
@@ -4451,6 +4512,54 @@ const styles = {
     color: "#1C2B39",
     background: "#fff",
     width: "100%",
+  },
+  richWrap: {
+    border: "1px solid #E0DDD3",
+    borderRadius: 8,
+    background: "#fff",
+    overflow: "hidden",
+  },
+  richToolbar: {
+    display: "flex",
+    alignItems: "center",
+    gap: 2,
+    padding: "5px 6px",
+    borderBottom: "1px solid #E0DDD3",
+    background: "#FBFAF7",
+  },
+  richToolbarBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 26,
+    height: 26,
+    border: "none",
+    background: "transparent",
+    borderRadius: 6,
+    color: "#5B6B75",
+    cursor: "pointer",
+  },
+  richToolbarDivider: {
+    width: 1,
+    height: 16,
+    background: "#E0DDD3",
+    margin: "0 4px",
+  },
+  richEditable: {
+    minHeight: 60,
+    padding: "9px 10px",
+    fontSize: 13.5,
+    fontFamily: "'Inter', sans-serif",
+    color: "#1C2B39",
+    outline: "none",
+  },
+  richPlaceholder: {
+    position: "absolute",
+    top: 9,
+    left: 10,
+    fontSize: 13.5,
+    color: "#B7BEC2",
+    pointerEvents: "none",
   },
   modalFooter: {
     display: "flex",
