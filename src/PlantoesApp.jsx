@@ -301,6 +301,12 @@ const formatShort = (dayKey) => {
   return `${pad(d)}/${pad(m)}/${y}`;
 };
 
+const formatShortWithWeekday = (dayKey) => {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  const weekday = DIAS_SEMANA[new Date(y, m - 1, d).getDay()];
+  return `${weekday}, ${pad(d)}/${pad(m)}/${y}`;
+};
+
 const normText = (s) =>
   (s || "")
     .toString()
@@ -2276,25 +2282,28 @@ export default function PlantoesApp() {
                     <table style={styles.searchTable}>
                       <thead>
                         <tr>
-                          <th style={styles.searchTh}>Data</th>
-                          <th style={styles.searchTh}>Nome</th>
-                          <th style={styles.searchTh}>Empresa</th>
-                          <th style={{ ...styles.searchTh, textAlign: "center" }}>
+                          <th style={{ ...styles.searchTh, ...styles.searchThBold }}>Data</th>
+                          <th style={{ ...styles.searchTh, ...styles.searchThBold }}>Nome</th>
+                          <th style={{ ...styles.searchTh, ...styles.searchThBold }}>Empresa</th>
+                          <th style={{ ...styles.searchTh, ...styles.searchThBold, textAlign: "center" }}>
                             Pago
                           </th>
-                          <th style={{ ...styles.searchTh, textAlign: "right" }}>
+                          <th style={{ ...styles.searchTh, ...styles.searchThBold, textAlign: "right" }}>
                             Valor
                           </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {searchResults.map((r) => (
+                        {searchResults.map((r, idx) => (
                           <tr
                             key={r.id}
-                            style={styles.searchRow}
+                            style={{
+                              ...styles.searchRow,
+                              background: idx % 2 === 1 ? "#F4F2ED" : "#fff",
+                            }}
                             onClick={() => goToSearchResult(r)}
                           >
-                            <td style={styles.searchTd}>{formatShort(r.dayKey)}</td>
+                            <td style={styles.searchTd}>{formatShortWithWeekday(r.dayKey)}</td>
                             <td style={styles.searchTdName}>
                               {r.type === "remocao"
                                 ? r.empresa || "remoção"
@@ -3690,6 +3699,11 @@ const styles = {
     position: "sticky",
     top: 0,
     background: "#fff",
+  },
+  searchThBold: {
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: "#1C2B39",
   },
   searchRow: { cursor: "pointer" },
   searchPagoBtn: {
