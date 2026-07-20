@@ -4115,6 +4115,7 @@ const styles = {
   cellSelected: {
     background: "#E7F0FB",
     borderColor: "#A9C7ED",
+    boxShadow: "0 0 0 2px #A9C7ED inset",
   },
   dayPanel: {
     marginTop: 14,
