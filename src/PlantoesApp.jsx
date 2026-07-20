@@ -3715,7 +3715,8 @@ const styles = {
   searchThBold: {
     fontSize: 12.5,
     fontWeight: 700,
-    color: "#1C2B39",
+    color: "#fff",
+    background: "#1C2B39",
   },
   searchRow: { cursor: "pointer" },
   searchPagoBtn: {
