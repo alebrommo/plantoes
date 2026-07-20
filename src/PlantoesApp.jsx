@@ -228,14 +228,27 @@ function stripHtml(html) {
 
 function RichTextEditor({ value, onChange, placeholder }) {
   const ref = useRef(null);
+  const [isEmpty, setIsEmpty] = useState(!value || value === "<br>");
+
+  useEffect(() => {
+    if (ref.current) ref.current.innerHTML = value || "";
+    // só define o conteúdo inicial — depois disso o div cuida do próprio texto,
+    // senão o cursor volta pro início a cada tecla e o texto sai invertido
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const emitChange = () => {
+    if (!ref.current) return;
+    const html = ref.current.innerHTML;
+    setIsEmpty(!html || html === "<br>");
+    onChange(html);
+  };
 
   const exec = (cmd) => {
     if (ref.current) ref.current.focus();
     document.execCommand(cmd);
-    if (ref.current) onChange(ref.current.innerHTML);
+    emitChange();
   };
-
-  const isEmpty = !value || value === "<br>";
 
   return (
     <div style={styles.richWrap}>
@@ -267,8 +280,7 @@ function RichTextEditor({ value, onChange, placeholder }) {
           contentEditable
           suppressContentEditableWarning
           style={styles.richEditable}
-          dangerouslySetInnerHTML={{ __html: value || "" }}
-          onInput={(e) => onChange(e.currentTarget.innerHTML)}
+          onInput={emitChange}
         />
       </div>
     </div>
