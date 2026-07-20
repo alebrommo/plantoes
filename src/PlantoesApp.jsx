@@ -191,60 +191,24 @@ const paletteFor = (id) => PALETTE.find((p) => p.id === id) || PALETTE[0];
 const defaultColorFor = (type) =>
   type === "plantao" ? "teal" : type === "evento" ? "azul" : "terracota";
 
-function ColorScroll({ options, value, onChange }) {
-  const ref = React.useRef(null);
-  const timeoutRef = React.useRef(null);
-  const itemW = 44;
-
-  React.useEffect(() => {
-    const idx = Math.max(0, options.findIndex((o) => o.id === value));
-    if (ref.current) ref.current.scrollLeft = idx * itemW;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const settle = () => {
-    if (!ref.current) return;
-    const idx = Math.max(
-      0,
-      Math.min(options.length - 1, Math.round(ref.current.scrollLeft / itemW))
-    );
-    ref.current.scrollTo({ left: idx * itemW, behavior: "smooth" });
-    onChange(options[idx].id);
-  };
-
-  const handleScroll = () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(settle, 110);
-  };
-
-  const pick = (idx) => {
-    if (ref.current) ref.current.scrollTo({ left: idx * itemW, behavior: "smooth" });
-    onChange(options[idx].id);
-  };
-
+function ColorGrid({ options, value, onChange }) {
   return (
-    <div style={styles.colorScrollWrap}>
-      <div style={styles.colorScrollBand} />
-      <div
-        ref={ref}
-        className="plantoes-scroll-col"
-        onScroll={handleScroll}
-        style={styles.colorScrollRow}
-      >
-        <div style={{ width: itemW, flexShrink: 0 }} />
-        {options.map((c, idx) => (
-          <div key={c.id} onClick={() => pick(idx)} style={styles.colorScrollItemWrap}>
-            <div
-              style={{
-                ...styles.colorScrollDot,
-                background: c.base,
-                ...(c.id === value ? styles.colorScrollDotActive : {}),
-              }}
-            />
-          </div>
-        ))}
-        <div style={{ width: itemW, flexShrink: 0 }} />
-      </div>
+    <div style={styles.colorGrid}>
+      {options.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          className="btn-lift"
+          onClick={() => onChange(c.id)}
+          title={c.label}
+          aria-label={c.label}
+          style={{
+            ...styles.colorGridDot,
+            background: c.base,
+            ...(c.id === value ? styles.colorGridDotActive : {}),
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -2689,7 +2653,7 @@ export default function PlantoesApp() {
               <div style={styles.fieldLabel}>
                 <span>Cor da etiqueta</span>
               </div>
-              <ColorScroll
+              <ColorGrid
                 options={PALETTE}
                 value={form.color || defaultColorFor(form.type)}
                 onChange={(id) => setForm((f) => ({ ...f, color: id }))}
@@ -3454,8 +3418,6 @@ const globalCss = `
   @media (prefers-reduced-motion: reduce) {
     .spin { animation: none; }
   }
-  .plantoes-scroll-col::-webkit-scrollbar { display: none; }
-  .plantoes-scroll-col { scrollbar-width: none; }
   @keyframes plantoes-toast-in {
     from { opacity: 0; transform: translate(-50%, 8px); }
     to { opacity: 1; transform: translate(-50%, 0); }
@@ -4381,54 +4343,23 @@ const styles = {
     fontWeight: 500,
   },
   moneySign: { fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 700 },
-  colorScrollWrap: {
-    position: "relative",
-    width: 132,
-    height: 56,
-    borderRadius: 10,
-    border: "1px solid #E0DDD3",
-    background: "#fff",
-    overflow: "hidden",
-    margin: "2px 0",
-  },
-  colorScrollBand: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    left: 44,
-    width: 44,
-    borderLeft: "1px solid #2D6E6E",
-    borderRight: "1px solid #2D6E6E",
-    background: "rgba(45,110,110,0.06)",
-    pointerEvents: "none",
-    zIndex: 1,
-  },
-  colorScrollRow: {
+  colorGrid: {
     display: "flex",
-    height: 56,
-    alignItems: "center",
-    overflowX: "auto",
-    scrollSnapType: "x mandatory",
+    flexWrap: "wrap",
+    gap: 10,
+    padding: "4px 0",
   },
-  colorScrollItemWrap: {
-    width: 44,
-    flexShrink: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    scrollSnapAlign: "center",
-    cursor: "pointer",
-  },
-  colorScrollDot: {
-    width: 26,
-    height: 26,
+  colorGridDot: {
+    width: 30,
+    height: 30,
     borderRadius: "50%",
     border: "2px solid transparent",
+    cursor: "pointer",
+    padding: 0,
   },
-  colorScrollDotActive: {
+  colorGridDotActive: {
     border: "2px solid #1C2B39",
-    boxShadow: "0 0 0 2px #FFFDF9",
-    transform: "scale(1.1)",
+    boxShadow: "0 0 0 2px #FFFDF9, 0 0 0 4px #1C2B39",
   },
   toast: {
     position: "fixed",
