@@ -44,9 +44,6 @@ import {
   Bold,
   Italic,
   List,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -228,61 +225,64 @@ function stripHtml(html) {
 
 function RichTextEditor({ value, onChange, placeholder }) {
   const ref = useRef(null);
-  const [isEmpty, setIsEmpty] = useState(!value || value === "<br>");
 
-  useEffect(() => {
-    if (ref.current) ref.current.innerHTML = value || "";
-    // só define o conteúdo inicial — depois disso o div cuida do próprio texto,
-    // senão o cursor volta pro início a cada tecla e o texto sai invertido
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const emitChange = () => {
-    if (!ref.current) return;
-    const html = ref.current.innerHTML;
-    setIsEmpty(!html || html === "<br>");
-    onChange(html);
+  const wrapSelection = (before, after = before) => {
+    const el = ref.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const text = value || "";
+    const selected = text.slice(start, end);
+    const next = text.slice(0, start) + before + selected + after + text.slice(end);
+    onChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(start + before.length, start + before.length + selected.length);
+    });
   };
 
-  const exec = (cmd) => {
-    if (ref.current) ref.current.focus();
-    document.execCommand(cmd);
-    emitChange();
+  const prefixLines = (prefix) => {
+    const el = ref.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const text = value || "";
+    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+    let lineEnd = text.indexOf("\n", end);
+    if (lineEnd === -1) lineEnd = text.length;
+    const block = text.slice(lineStart, lineEnd);
+    const prefixed = block
+      .split("\n")
+      .map((line) => (line.startsWith(prefix) ? line : prefix + line))
+      .join("\n");
+    const next = text.slice(0, lineStart) + prefixed + text.slice(lineEnd);
+    onChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(lineStart, lineStart + prefixed.length);
+    });
   };
 
   return (
     <div style={styles.richWrap}>
       <div style={styles.richToolbar}>
-        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("bold"); }} title="Negrito">
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); wrapSelection("**"); }} title="Negrito">
           <Bold size={13} />
         </button>
-        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("italic"); }} title="Itálico">
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); wrapSelection("_"); }} title="Itálico">
           <Italic size={13} />
         </button>
-        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("insertUnorderedList"); }} title="Tópicos">
+        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); prefixLines("- "); }} title="Tópicos">
           <List size={13} />
         </button>
-        <span style={styles.richToolbarDivider} />
-        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("justifyLeft"); }} title="Alinhar à esquerda">
-          <AlignLeft size={13} />
-        </button>
-        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("justifyCenter"); }} title="Centralizar">
-          <AlignCenter size={13} />
-        </button>
-        <button type="button" className="btn-icon" style={styles.richToolbarBtn} onMouseDown={(e) => { e.preventDefault(); exec("justifyRight"); }} title="Alinhar à direita">
-          <AlignRight size={13} />
-        </button>
       </div>
-      <div style={{ position: "relative" }}>
-        {isEmpty && <span style={styles.richPlaceholder}>{placeholder}</span>}
-        <div
-          ref={ref}
-          contentEditable
-          suppressContentEditableWarning
-          style={styles.richEditable}
-          onInput={emitChange}
-        />
-      </div>
+      <textarea
+        ref={ref}
+        style={styles.richEditable}
+        value={value || ""}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
     </div>
   );
 }
@@ -4565,27 +4565,18 @@ const styles = {
     color: "#5B6B75",
     cursor: "pointer",
   },
-  richToolbarDivider: {
-    width: 1,
-    height: 16,
-    background: "#E0DDD3",
-    margin: "0 4px",
-  },
   richEditable: {
+    display: "block",
+    width: "100%",
     minHeight: 60,
     padding: "9px 10px",
     fontSize: 13.5,
     fontFamily: "'Inter', sans-serif",
     color: "#1C2B39",
+    border: "none",
     outline: "none",
-  },
-  richPlaceholder: {
-    position: "absolute",
-    top: 9,
-    left: 10,
-    fontSize: 13.5,
-    color: "#B7BEC2",
-    pointerEvents: "none",
+    resize: "vertical",
+    boxSizing: "border-box",
   },
   modalFooter: {
     display: "flex",
