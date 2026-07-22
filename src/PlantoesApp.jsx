@@ -308,6 +308,17 @@ const todayKey = () => {
 };
 const firstDayKey = (y, m) => keyFor(y, m, 1);
 const lastDayKey = (y, m) => keyFor(y, m, new Date(y, m + 1, 0).getDate());
+const addDays = (dayKey, delta) => {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  const date = new Date(y, m - 1, d + delta);
+  return keyFor(date.getFullYear(), date.getMonth(), date.getDate());
+};
+const weekDaysFor = (dayKey) => {
+  const [y, m, d] = dayKey.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const sunday = addDays(dayKey, -date.getDay());
+  return Array.from({ length: 7 }, (_, i) => addDays(sunday, i));
+};
 const formatShort = (dayKey) => {
   const [y, m, d] = dayKey.split("-").map(Number);
   return `${pad(d)}/${pad(m)}/${y}`;
@@ -764,6 +775,8 @@ export default function PlantoesApp() {
   });
   const [selectedDay, setSelectedDay] = useState(null); // "YYYY-MM-DD"
   const [viewDay, setViewDay] = useState(() => todayKey()); // dia exibido no painel abaixo do calendário
+  const [calendarView, setCalendarView] = useState("mes"); // "mes" | "semana" | "dia"
+  const activeDay = viewDay || todayKey();
   const [draggedEntry, setDraggedEntry] = useState(null); // { dayKey, id }
   const [dragOverDay, setDragOverDay] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1042,6 +1055,8 @@ export default function PlantoesApp() {
     while (cells.length % 7 !== 0) cells.push(null);
     return cells;
   }, [cursor]);
+
+  const weekDaysList = useMemo(() => weekDaysFor(activeDay), [activeDay]);
 
   const monthTotals = useMemo(() => {
     const { year, month } = cursor;
@@ -1546,6 +1561,20 @@ export default function PlantoesApp() {
     const t = new Date();
     setCursor({ year: t.getFullYear(), month: t.getMonth() });
     setViewDay(todayKey());
+  };
+
+  const goWeek = (delta) => {
+    const next = addDays(activeDay, delta * 7);
+    const [y, m] = next.split("-").map(Number);
+    setCursor({ year: y, month: m - 1 });
+    setViewDay(next);
+  };
+
+  const goDay = (delta) => {
+    const next = addDays(activeDay, delta);
+    const [y, m] = next.split("-").map(Number);
+    setCursor({ year: y, month: m - 1 });
+    setViewDay(next);
   };
 
   const openAddModal = (dayKey) => {
@@ -2423,14 +2452,59 @@ export default function PlantoesApp() {
 
         {activeTab === "calendario" && (
         <>
+        <div style={styles.viewToggle}>
+          <button
+            type="button"
+            className="btn-lift"
+            style={{ ...styles.viewToggleBtn, ...(calendarView === "mes" ? styles.viewToggleBtnActive : {}) }}
+            onClick={() => setCalendarView("mes")}
+          >
+            mensal
+          </button>
+          <button
+            type="button"
+            className="btn-lift"
+            style={{ ...styles.viewToggleBtn, ...(calendarView === "semana" ? styles.viewToggleBtnActive : {}) }}
+            onClick={() => setCalendarView("semana")}
+          >
+            semanal
+          </button>
+          <button
+            type="button"
+            className="btn-lift"
+            style={{ ...styles.viewToggleBtn, ...(calendarView === "dia" ? styles.viewToggleBtnActive : {}) }}
+            onClick={() => setCalendarView("dia")}
+          >
+            diário
+          </button>
+        </div>
+
         <div style={styles.monthNav}>
-          <button className="btn-icon" style={styles.navBtn} onClick={() => goMonth(-1)} aria-label="Mês anterior">
+          <button
+            className="btn-icon"
+            style={styles.navBtn}
+            onClick={() => (calendarView === "mes" ? goMonth(-1) : calendarView === "semana" ? goWeek(-1) : goDay(-1))}
+            aria-label="Anterior"
+          >
             <ChevronLeft size={18} />
           </button>
           <div style={styles.monthLabel}>
-            {MESES[cursor.month]} <span style={styles.year}>{cursor.year}</span>
+            {calendarView === "mes" ? (
+              <>
+                {MESES[cursor.month]} <span style={styles.year}>{cursor.year}</span>
+              </>
+            ) : calendarView === "semana" ? (
+              formatWeekRange(weekDaysList)
+            ) : (
+              formatFullDate(activeDay)
+            )}
           </div>
-          <button className="btn-icon" style={styles.navBtn} onClick={() => goMonth(1)} aria-label="Próximo mês">
+          <button
+            className="btn-icon"
+            style={styles.navBtn}
+            onClick={() => (calendarView === "mes" ? goMonth(1) : calendarView === "semana" ? goWeek(1) : goDay(1))}
+            aria-label="Próximo"
+          >
             <ChevronRight size={18} />
           </button>
           <button className="btn-lift" style={styles.todayBtn} onClick={goToday}>
@@ -2500,17 +2574,22 @@ export default function PlantoesApp() {
         </div>
       ) : (
         <>
-          <div style={styles.dragHint}>
-            Arraste um plantão ou remoção para outro dia para reagendar.
-          </div>
-          <div style={styles.weekHeader}>
-            {DIAS_SEMANA.map((d) => (
-              <div key={d} style={styles.weekHeaderCell}>
-                {d}
-              </div>
-            ))}
-          </div>
+          {calendarView !== "dia" && (
+            <div style={styles.dragHint}>
+              Arraste um plantão ou remoção para outro dia para reagendar.
+            </div>
+          )}
+          {calendarView !== "dia" && (
+            <div style={styles.weekHeader}>
+              {DIAS_SEMANA.map((d) => (
+                <div key={d} style={styles.weekHeaderCell}>
+                  {d}
+                </div>
+              ))}
+            </div>
+          )}
 
+          {calendarView === "mes" && (
           <div style={styles.grid} className="cal-grid">
             {daysGrid.map((d, i) => {
               if (d === null) return <div key={i} style={styles.emptyCell} />;
@@ -2613,6 +2692,111 @@ export default function PlantoesApp() {
               );
             })}
           </div>
+          )}
+
+          {calendarView === "semana" && (
+          <div style={styles.grid} className="cal-grid">
+            {weekDaysList.map((dayKey) => {
+              const d = Number(dayKey.split("-")[2]);
+              const list = entries[dayKey] || [];
+              const isToday = dayKey === todayKey();
+              const isDragOver = dragOverDay === dayKey;
+              const isSelected = dayKey === viewDay;
+              return (
+                <div
+                  key={`${dayKey}-${isSelected}`}
+                  className="cal-cell"
+                  style={{
+                    ...styles.cell,
+                    ...(isToday ? styles.cellToday : {}),
+                    ...(isSelected ? styles.cellSelected : {}),
+                    ...(isDragOver ? styles.cellDragOver : {}),
+                  }}
+                  onClick={() => setViewDay((prev) => (prev === dayKey ? null : dayKey))}
+                  onDragOver={(evt) => {
+                    evt.preventDefault();
+                    if (dragOverDay !== dayKey) setDragOverDay(dayKey);
+                  }}
+                  onDragLeave={() => {
+                    setDragOverDay((prev) => (prev === dayKey ? null : prev));
+                  }}
+                  onDrop={(evt) => {
+                    evt.preventDefault();
+                    if (draggedEntry) {
+                      moveEntry(draggedEntry.dayKey, draggedEntry.id, dayKey);
+                    }
+                    setDraggedEntry(null);
+                    setDragOverDay(null);
+                  }}
+                >
+                  <div style={styles.cellHeader}>
+                    <span style={{ ...styles.cellNum, ...(isToday ? styles.cellNumToday : {}) }}>
+                      {d}
+                    </span>
+                    <button
+                      className="btn-icon"
+                      style={styles.addBtn}
+                      onClick={() => openAddModal(dayKey)}
+                      aria-label={`Adicionar em ${d}`}
+                    >
+                      <Plus size={12} strokeWidth={2.5} />
+                    </button>
+                  </div>
+                  <div style={styles.chipStack}>
+                    {list.map((e) => {
+                      const c = paletteFor(e.color || defaultColorFor(e.type));
+                      const isDragging =
+                        draggedEntry && draggedEntry.id === e.id && draggedEntry.dayKey === dayKey;
+                      return (
+                      <button
+                        key={e.id}
+                        draggable
+                        className="chip-lift"
+                        onDragStart={(evt) => {
+                          setDraggedEntry({ dayKey, id: e.id });
+                          evt.dataTransfer.effectAllowed = "move";
+                          evt.dataTransfer.setData("text/plain", e.id);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedEntry(null);
+                          setDragOverDay(null);
+                        }}
+                        style={{
+                          ...styles.entryChip,
+                          background: c.bg,
+                          color: c.text,
+                          ...(isDragging ? styles.entryChipDragging : {}),
+                        }}
+                        onClick={() => openEditModal(dayKey, e)}
+                        title={e.type === "remocao" ? e.empresa : e.local}
+                      >
+                        {e.type === "plantao" ? (
+                          <Stethoscope size={10} />
+                        ) : e.type === "evento" ? (
+                          <Presentation size={10} />
+                        ) : (
+                          <Truck size={10} />
+                        )}
+                        <span style={styles.chipText}>
+                          {e.type === "remocao"
+                            ? e.empresa || "remoção"
+                            : `${e.iH ? `${e.iH}:${e.iM} · ` : ""}${e.local || (e.type === "evento" ? "evento" : "plantão")}`}
+                        </span>
+                        {e.pago ? (
+                          <CheckCircle2 size={10} style={{ flexShrink: 0 }} />
+                        ) : (
+                          <Circle size={10} style={{ flexShrink: 0, opacity: 0.5 }} />
+                        )}
+                        <span style={styles.chipValue}>{currency(e.value)}</span>
+                      </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          )}
 
           <div style={styles.dayPanel}>
             <div style={styles.dayPanelHeader}>
@@ -3493,6 +3677,14 @@ function formatFullDate(dayKey) {
   return `${dias[date.getDay()]}, ${d} de ${MESES[m - 1].toLowerCase()}`;
 }
 
+function formatWeekRange(days) {
+  const [y1, m1, d1] = days[0].split("-").map(Number);
+  const [y2, m2, d2] = days[6].split("-").map(Number);
+  if (m1 === m2) return `${d1} – ${d2} de ${MESES[m1 - 1].toLowerCase()} de ${y1}`;
+  if (y1 === y2) return `${d1} de ${MESES[m1 - 1].toLowerCase()} – ${d2} de ${MESES[m2 - 1].toLowerCase()} de ${y1}`;
+  return `${d1} de ${MESES[m1 - 1].toLowerCase()} de ${y1} – ${d2} de ${MESES[m2 - 1].toLowerCase()} de ${y2}`;
+}
+
 const globalCss = `
   * { box-sizing: border-box; }
   .spin { animation: plantoes-spin 1s linear infinite; }
@@ -3918,6 +4110,30 @@ const styles = {
     background: "#F6EFDD",
     padding: "4px 8px",
     borderRadius: 6,
+  },
+  viewToggle: {
+    display: "flex",
+    gap: 6,
+    marginBottom: 12,
+    background: "#F1EFE9",
+    borderRadius: 10,
+    padding: 4,
+    width: "fit-content",
+  },
+  viewToggleBtn: {
+    padding: "6px 14px",
+    borderRadius: 8,
+    border: "none",
+    background: "transparent",
+    color: "#5B6B75",
+    fontSize: 12.5,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  viewToggleBtnActive: {
+    background: "#1C2B39",
+    color: "#fff",
+    boxShadow: "0 2px 6px rgba(28,43,57,0.25)",
   },
   monthNav: {
     display: "flex",
