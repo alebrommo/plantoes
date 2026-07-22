@@ -1059,6 +1059,38 @@ export default function PlantoesApp() {
 
   const weekDaysList = useMemo(() => weekDaysFor(activeDay), [activeDay]);
 
+  const weeklyTotals = useMemo(() => {
+    const weeks = [];
+    for (let i = 0; i < daysGrid.length; i += 7) {
+      const rowDays = daysGrid.slice(i, i + 7).filter((d) => d !== null);
+      if (rowDays.length === 0) continue;
+      let total = 0,
+        recebido = 0,
+        pendente = 0,
+        count = 0;
+      rowDays.forEach((d) => {
+        const dayKey = keyFor(cursor.year, cursor.month, d);
+        (entries[dayKey] || []).forEach((e) => {
+          const v = Number(e.value) || 0;
+          total += v;
+          count += 1;
+          if (e.pago) recebido += v;
+          else pendente += v;
+        });
+      });
+      const first = rowDays[0];
+      const last = rowDays[rowDays.length - 1];
+      weeks.push({
+        label: first === last ? `dia ${first}` : `${first}–${last}`,
+        total,
+        recebido,
+        pendente,
+        count,
+      });
+    }
+    return weeks;
+  }, [daysGrid, entries, cursor]);
+
   const monthTotals = useMemo(() => {
     const { year, month } = cursor;
     const prefix = `${year}-${pad(month + 1)}-`;
@@ -2868,6 +2900,35 @@ export default function PlantoesApp() {
               </div>
             )}
           </div>
+
+          {calendarView === "mes" && (
+            <div style={styles.weekCompareWrap}>
+              <p style={styles.statsSectionTitle}>Comparação por semana</p>
+              <div style={styles.weekCompareList}>
+                {weeklyTotals.map((w, i) => {
+                  const maxTotal = Math.max(1, ...weeklyTotals.map((x) => x.total));
+                  return (
+                    <div key={i} style={styles.weekCompareRow}>
+                      <div style={styles.weekCompareTop}>
+                        <span style={styles.weekCompareLabel}>
+                          semana {i + 1} <span style={styles.weekCompareDates}>({w.label})</span>
+                        </span>
+                        <span style={styles.weekCompareValue}>{currency(w.total)}</span>
+                      </div>
+                      <div style={styles.weekCompareBarTrack}>
+                        <div
+                          style={{
+                            ...styles.weekCompareBarFill,
+                            width: `${(w.total / maxTotal) * 100}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </>
       ))}
 
@@ -4511,6 +4572,58 @@ const styles = {
   dayPanelBadgePendente: {
     color: "#8C6D1B",
     background: "#F6EFDD",
+  },
+  weekCompareWrap: {
+    marginTop: 14,
+    background: "#fff",
+    border: "1px solid #E0DDD3",
+    borderRadius: 10,
+    boxShadow: "0 4px 14px rgba(28,43,57,0.06)",
+    padding: 12,
+  },
+  weekCompareList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  weekCompareRow: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  weekCompareTop: {
+    display: "flex",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+  },
+  weekCompareLabel: {
+    fontSize: 12.5,
+    fontWeight: 600,
+    color: "#1C2B39",
+    textTransform: "capitalize",
+  },
+  weekCompareDates: {
+    fontSize: 11,
+    fontWeight: 400,
+    color: "#8A8578",
+    textTransform: "none",
+  },
+  weekCompareValue: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#1C2B39",
+    fontFamily: "'IBM Plex Mono', monospace",
+  },
+  weekCompareBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    background: "#F1EFE9",
+    overflow: "hidden",
+  },
+  weekCompareBarFill: {
+    height: "100%",
+    borderRadius: 4,
+    background: "#2D6E6E",
   },
   dragHint: {
     fontSize: 11,
