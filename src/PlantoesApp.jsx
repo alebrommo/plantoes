@@ -520,7 +520,7 @@ function buildPdfPages(data) {
   };
 
   page.push(
-    pdfTextOp(PDF_MARGIN, y, 16, "F2", "Resumo de plantões e remoções", PDF_DARK)
+    pdfTextOp(PDF_MARGIN, y, 16, "F2", data.title || "Resumo de plantões e remoções", PDF_DARK)
   );
   y -= 18;
   page.push(
@@ -786,6 +786,7 @@ export default function PlantoesApp() {
     return {
       start: firstDayKey(t.getFullYear(), t.getMonth()),
       end: lastDayKey(t.getFullYear(), t.getMonth()),
+      title: "",
     };
   });
   const [printDraft, setPrintDraft] = useState(null);
@@ -1102,7 +1103,7 @@ export default function PlantoesApp() {
 
   const computePrintData = useCallback(
     (range) => {
-      const { start, end } = range;
+      const { start, end, title } = range;
       const days = Object.keys(entries)
         .filter((k) => k >= start && k <= end)
         .sort();
@@ -1136,6 +1137,7 @@ export default function PlantoesApp() {
       return {
         start,
         end,
+        title: title || "",
         rows,
         plantaoSum,
         plantaoCount,
@@ -1419,17 +1421,18 @@ export default function PlantoesApp() {
   );
 
   const openPrintModal = () => {
-    setPrintDraft({ start: printRange.start, end: printRange.end });
+    setPrintDraft({ start: printRange.start, end: printRange.end, title: printRange.title || "" });
     setPrintModalOpen(true);
   };
 
   const applyPreset = (preset) => {
     const t = new Date();
     if (preset === "esteMes") {
-      setPrintDraft({
+      setPrintDraft((d) => ({
+        ...d,
         start: firstDayKey(t.getFullYear(), t.getMonth()),
         end: lastDayKey(t.getFullYear(), t.getMonth()),
-      });
+      }));
     } else if (preset === "mesPassado") {
       let y = t.getFullYear(),
         m = t.getMonth() - 1;
@@ -1437,12 +1440,13 @@ export default function PlantoesApp() {
         m = 11;
         y -= 1;
       }
-      setPrintDraft({ start: firstDayKey(y, m), end: lastDayKey(y, m) });
+      setPrintDraft((d) => ({ ...d, start: firstDayKey(y, m), end: lastDayKey(y, m) }));
     } else if (preset === "esteAno") {
-      setPrintDraft({
+      setPrintDraft((d) => ({
+        ...d,
         start: keyFor(t.getFullYear(), 0, 1),
         end: keyFor(t.getFullYear(), 11, 31),
-      });
+      }));
     }
   };
 
@@ -1483,7 +1487,7 @@ export default function PlantoesApp() {
         Number(e.value) || 0,
       ]);
       const sheetData = [
-        [`Resumo de plantões, remoções e eventos — ${formatShort(data.start)} a ${formatShort(data.end)}`],
+        [`${data.title || "Resumo de plantões e remoções"} — ${formatShort(data.start)} a ${formatShort(data.end)}`],
         [],
         header,
         ...rows,
@@ -3214,6 +3218,17 @@ export default function PlantoesApp() {
                 }
               />
             </Field>
+            <Field icon={<StickyNote size={14} />} label="Título do relatório (opcional)">
+              <input
+                type="text"
+                style={styles.input}
+                value={printDraft.title}
+                onChange={(e) =>
+                  setPrintDraft((d) => ({ ...d, title: e.target.value }))
+                }
+                placeholder="Resumo de plantões e remoções"
+              />
+            </Field>
           </div>
 
           <div style={styles.popupHint}>
@@ -3262,7 +3277,7 @@ export default function PlantoesApp() {
 
     <div className="print-report" style={styles.printReport}>
       <div style={styles.printHeader}>
-        <div style={styles.printTitle}>Resumo de plantões e remoções</div>
+        <div style={styles.printTitle}>{printData.title || "Resumo de plantões e remoções"}</div>
         <div style={styles.printSubtitle}>
           Período: {formatShort(printData.start)} a {formatShort(printData.end)}
         </div>
