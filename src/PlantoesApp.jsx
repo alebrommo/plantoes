@@ -114,6 +114,7 @@ function rowToEntry(row) {
       fH: row.f_h,
       fM: row.f_m,
       turno: row.turno,
+      remocoes: Array.isArray(row.remocoes) ? row.remocoes : [],
     };
   }
   if (row.type === "evento") {
@@ -153,6 +154,7 @@ function entryToRow(dayKey, entry, userId) {
     f_h: entry.fH ?? null,
     f_m: entry.fM ?? null,
     turno: entry.turno ?? null,
+    remocoes: entry.remocoes ?? [],
     empresa: entry.empresa ?? null,
     paciente: entry.paciente ?? null,
     origem: entry.origem ?? null,
@@ -175,6 +177,8 @@ const MESES = [
   "Julho","Agosto","Setembro","Outubro","Novembro","Dezembro",
 ];
 const DIAS_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+// Ordem de exibição do cabeçalho do calendário: semana começando na segunda-feira.
+const WEEK_HEADER_LABELS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"];
 
 const TYPE_CHART_COLORS = { plantao: "#2D6E6E", remocao: "#B5541F", evento: "#2A5DA8" };
 
@@ -363,8 +367,8 @@ const addDays = (dayKey, delta) => {
 const weekDaysFor = (dayKey) => {
   const [y, m, d] = dayKey.split("-").map(Number);
   const date = new Date(y, m - 1, d);
-  const sunday = addDays(dayKey, -date.getDay());
-  return Array.from({ length: 7 }, (_, i) => addDays(sunday, i));
+  const monday = addDays(dayKey, -((date.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, i) => addDays(monday, i));
 };
 const formatShort = (dayKey) => {
   const [y, m, d] = dayKey.split("-").map(Number);
@@ -511,8 +515,7 @@ const emptyForm = {
   obs: "",
   color: null,
   pago: false,
-  temRemocao: false,
-  valorRemocao: "",
+  remocoes: [],
 };
 
 const PDF_PAGE_W = 595;
@@ -1097,7 +1100,7 @@ export default function PlantoesApp() {
   const daysGrid = useMemo(() => {
     const { year, month } = cursor;
     const first = new Date(year, month, 1);
-    const startOffset = first.getDay();
+    const startOffset = (first.getDay() + 6) % 7;
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const cells = [];
     for (let i = 0; i < startOffset; i++) cells.push(null);
@@ -1699,11 +1702,13 @@ export default function PlantoesApp() {
   const openEditModal = (dayKey, entry) => {
     setSelectedDay(dayKey);
     setEditingId(entry.id);
+    const remocoes = Array.isArray(entry.remocoes) ? entry.remocoes : [];
+    const remocoesTotal = remocoes.reduce((s, v) => s + (Number(v) || 0), 0);
     setForm({
       ...emptyForm,
       ...entry,
-      value: String(entry.valorPlantao ?? entry.value),
-      valorRemocao: entry.valorRemocao ? String(entry.valorRemocao) : "",
+      value: String(entry.value - remocoesTotal),
+      remocoes: remocoes.map((v) => String(v)),
     });
     setDuplicating(false);
     setModalOpen(true);
@@ -1786,7 +1791,10 @@ export default function PlantoesApp() {
       return;
     }
     const isHapvida = form.type === "plantao" && form.local.trim().toUpperCase().includes("HAPVIDA");
-    const remocaoExtra = isHapvida && form.temRemocao ? parseBRL(form.valorRemocao) || 0 : 0;
+    const remocaoValues = isHapvida
+      ? form.remocoes.map((v) => parseBRL(v)).filter((v) => v > 0)
+      : [];
+    const remocaoExtra = remocaoValues.reduce((s, v) => s + v, 0);
     const value = baseValue + remocaoExtra;
     if (form.type === "plantao" && !form.local.trim()) {
       showToast("Informe o local / hospital", "error");
@@ -1820,6 +1828,7 @@ export default function PlantoesApp() {
             fM: form.fM,
             turno: `${form.iH}:${form.iM} – ${form.fH}:${form.fM}`,
             obs: form.obs,
+            remocoes: remocaoValues,
           }
         : form.type === "evento"
         ? {
@@ -2700,7 +2709,7 @@ export default function PlantoesApp() {
           )}
           {calendarView !== "dia" && (
             <div style={styles.weekHeader}>
-              {DIAS_SEMANA.map((d) => (
+              {WEEK_HEADER_LABELS.map((d) => (
                 <div key={d} style={styles.weekHeaderCell}>
                   {d}
                 </div>
@@ -3126,28 +3135,57 @@ export default function PlantoesApp() {
 
                   {form.local.trim().toUpperCase().includes("HAPVIDA") && (
                     <div style={styles.field}>
-                      <label style={styles.checkboxRow}>
-                        <input
-                          type="checkbox"
-                          checked={!!form.temRemocao}
-                          onChange={(e) => setForm((f) => ({ ...f, temRemocao: e.target.checked }))}
-                          style={styles.checkboxInput}
-                        />
-                        <span style={styles.checkboxLabel}>
-                          <Truck size={15} color={form.temRemocao ? "#B5541F" : "#8C6D1B"} />
-                          Teve remoção nesse plantão?
-                        </span>
-                      </label>
-                      {form.temRemocao && (
-                        <Field icon={<Truck size={14} />} label="Valor da remoção (somado ao plantão)">
+                      <div style={styles.fieldLabel}>
+                        <Truck size={14} />
+                        <span>Remoções deste plantão (opcional)</span>
+                      </div>
+                      {form.remocoes.map((v, idx) => (
+                        <div key={idx} style={styles.rowFields}>
                           <input
                             style={{ ...styles.input, fontFamily: "'IBM Plex Mono', monospace" }}
-                            value={form.valorRemocao}
-                            onChange={(e) => setForm((f) => ({ ...f, valorRemocao: e.target.value }))}
-                            placeholder="0,00"
+                            value={v}
+                            onChange={(e) =>
+                              setForm((f) => {
+                                const next = [...f.remocoes];
+                                next[idx] = e.target.value;
+                                return { ...f, remocoes: next };
+                              })
+                            }
+                            placeholder={`Remoção ${idx + 1} — 0,00`}
                             inputMode="decimal"
                           />
-                        </Field>
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            style={styles.removeRemocaoBtn}
+                            onClick={() =>
+                              setForm((f) => ({
+                                ...f,
+                                remocoes: f.remocoes.filter((_, i) => i !== idx),
+                              }))
+                            }
+                            aria-label="Remover essa remoção"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="btn-lift"
+                        style={styles.addRemocaoBtn}
+                        onClick={() => setForm((f) => ({ ...f, remocoes: [...f.remocoes, ""] }))}
+                      >
+                        <Plus size={13} /> adicionar remoção
+                      </button>
+                      {form.remocoes.length > 0 && (
+                        <div style={styles.remocaoTotal}>
+                          Total (plantão + remoções):{" "}
+                          {currency(
+                            (parseBRL(form.value) || 0) +
+                              form.remocoes.reduce((s, v) => s + (parseBRL(v) || 0), 0)
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -4971,6 +5009,36 @@ const styles = {
     gap: 6,
     fontSize: 13,
     fontWeight: 500,
+    color: "#1C2B39",
+  },
+  removeRemocaoBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 34,
+    flexShrink: 0,
+    border: "1px solid #E9C9B4",
+    background: "transparent",
+    color: "#B5541F",
+    borderRadius: 8,
+    cursor: "pointer",
+  },
+  addRemocaoBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    alignSelf: "flex-start",
+    border: "1px dashed #B7BEC2",
+    background: "transparent",
+    color: "#5B6B75",
+    borderRadius: 8,
+    padding: "6px 10px",
+    fontSize: 12.5,
+    cursor: "pointer",
+  },
+  remocaoTotal: {
+    fontSize: 12.5,
+    fontWeight: 600,
     color: "#1C2B39",
   },
   timeRangeRow: {
