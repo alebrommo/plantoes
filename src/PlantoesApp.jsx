@@ -216,6 +216,53 @@ function ColorGrid({ options, value, onChange }) {
   );
 }
 
+function AutocompleteInput({ value, onChange, options, placeholder, style }) {
+  const [open, setOpen] = useState(false);
+
+  const matches = useMemo(() => {
+    const q = (value || "").trim().toLowerCase();
+    const filtered = q
+      ? options.filter((o) => o.toLowerCase().includes(q) && o.toLowerCase() !== q)
+      : options;
+    return filtered.slice(0, 8);
+  }, [value, options]);
+
+  return (
+    <div style={styles.acWrap}>
+      <input
+        style={style || styles.input}
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 120)}
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      {open && matches.length > 0 && (
+        <div style={styles.acDropdown}>
+          {matches.map((m) => (
+            <div
+              key={m}
+              style={styles.acItem}
+              className="ac-item"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChange(m);
+                setOpen(false);
+              }}
+            >
+              {m}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function stripHtml(html) {
   if (!html) return "";
   const div = document.createElement("div");
@@ -3056,16 +3103,14 @@ export default function PlantoesApp() {
                   </div>
 
                   <Field icon={<Building2 size={14} />} label="Local / hospital">
-                    <input
-                      style={styles.input}
+                    <AutocompleteInput
                       value={form.local}
-                      onChange={(e) => {
-                        const v = e.target.value;
+                      options={fieldSuggestions.local}
+                      onChange={(v) => {
                         const matchColor = colorForFieldValue("local", v);
                         setForm((f) => ({ ...f, local: v, ...(matchColor ? { color: matchColor } : {}) }));
                       }}
                       placeholder="ex: Hospital São Lucas"
-                      list="dl-local"
                     />
                   </Field>
                 </>
@@ -3106,71 +3151,62 @@ export default function PlantoesApp() {
                   </div>
 
                   <Field icon={<Presentation size={14} />} label="Nome do evento">
-                    <input
-                      style={styles.input}
+                    <AutocompleteInput
                       value={form.local}
-                      onChange={(e) => {
-                        const v = e.target.value;
+                      options={fieldSuggestions.local}
+                      onChange={(v) => {
                         const matchColor = colorForFieldValue("local", v);
                         setForm((f) => ({ ...f, local: v, ...(matchColor ? { color: matchColor } : {}) }));
                       }}
                       placeholder="ex: Congresso Brasileiro de Cardiologia"
-                      list="dl-local"
                     />
                   </Field>
                   <Field icon={<Building2 size={14} />} label="Nome da empresa">
-                    <input
-                      style={styles.input}
+                    <AutocompleteInput
                       value={form.empresa}
-                      onChange={(e) => {
-                        const v = e.target.value;
+                      options={fieldSuggestions.empresa}
+                      onChange={(v) => {
                         const matchColor = colorForFieldValue("empresa", v);
                         setForm((f) => ({ ...f, empresa: v, ...(matchColor ? { color: matchColor } : {}) }));
                       }}
                       placeholder="ex: Sociedade Brasileira de Cardiologia"
-                      list="dl-empresa"
                     />
                   </Field>
                 </>
               ) : (
                 <>
                   <Field icon={<Building2 size={14} />} label="Empresa da remoção">
-                    <input
-                      style={styles.input}
+                    <AutocompleteInput
                       value={form.empresa}
-                      onChange={(e) => {
-                        const v = e.target.value;
+                      options={fieldSuggestions.empresa}
+                      onChange={(v) => {
                         const matchColor = colorForFieldValue("empresa", v);
                         setForm((f) => ({ ...f, empresa: v, ...(matchColor ? { color: matchColor } : {}) }));
                       }}
                       placeholder="ex: Vida Ambulâncias"
-                      list="dl-empresa"
                     />
                   </Field>
                   <Field icon={<User size={14} />} label="Paciente (opcional)">
-                    <input
-                      style={styles.input}
+                    <AutocompleteInput
                       value={form.paciente}
-                      onChange={(e) => setForm((f) => ({ ...f, paciente: e.target.value }))}
+                      options={fieldSuggestions.paciente}
+                      onChange={(v) => setForm((f) => ({ ...f, paciente: v }))}
                       placeholder="identificação opcional"
-                      list="dl-paciente"
                     />
                   </Field>
                   <Field icon={<MapPin size={14} />} label="Origem → destino (opcional)">
                     <div style={styles.rowFields}>
-                      <input
-                        style={styles.input}
+                      <AutocompleteInput
                         value={form.origem}
-                        onChange={(e) => setForm((f) => ({ ...f, origem: e.target.value }))}
+                        options={fieldSuggestions.origem}
+                        onChange={(v) => setForm((f) => ({ ...f, origem: v }))}
                         placeholder="origem"
-                        list="dl-origem"
                       />
-                      <input
-                        style={styles.input}
+                      <AutocompleteInput
                         value={form.destino}
-                        onChange={(e) => setForm((f) => ({ ...f, destino: e.target.value }))}
+                        options={fieldSuggestions.destino}
+                        onChange={(v) => setForm((f) => ({ ...f, destino: v }))}
                         placeholder="destino"
-                        list="dl-destino"
                       />
                     </div>
                   </Field>
@@ -3212,32 +3248,6 @@ export default function PlantoesApp() {
                 />
               </Field>
             </div>
-
-            <datalist id="dl-local">
-              {fieldSuggestions.local.map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
-            <datalist id="dl-empresa">
-              {fieldSuggestions.empresa.map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
-            <datalist id="dl-paciente">
-              {fieldSuggestions.paciente.map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
-            <datalist id="dl-origem">
-              {fieldSuggestions.origem.map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
-            <datalist id="dl-destino">
-              {fieldSuggestions.destino.map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
 
             {duplicating ? (
               <div style={styles.duplicateRow}>
@@ -3890,6 +3900,7 @@ const globalCss = `
     box-shadow: 0 3px 9px rgba(28,43,57,0.2);
     background-color: #F1EFE9;
   }
+  .ac-item:hover { background-color: #F1EFE9; }
   .btn-icon:active:not(:disabled) {
     transform: scale(0.9);
     transition-duration: 0.06s;
@@ -4958,6 +4969,30 @@ const styles = {
     color: "#1C2B39",
     background: "#fff",
     width: "100%",
+  },
+  acWrap: {
+    position: "relative",
+    flex: 1,
+    minWidth: 0,
+  },
+  acDropdown: {
+    position: "absolute",
+    top: "calc(100% + 4px)",
+    left: 0,
+    right: 0,
+    background: "#fff",
+    border: "1px solid #E0DDD3",
+    borderRadius: 8,
+    boxShadow: "0 8px 20px rgba(28,43,57,0.14)",
+    maxHeight: 180,
+    overflowY: "auto",
+    zIndex: 20,
+  },
+  acItem: {
+    padding: "8px 10px",
+    fontSize: 13,
+    color: "#1C2B39",
+    cursor: "pointer",
   },
   richWrap: {
     border: "1px solid #E0DDD3",
