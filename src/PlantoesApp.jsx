@@ -1210,6 +1210,16 @@ export default function PlantoesApp() {
     };
   }, [allEntries]);
 
+  const colorForFieldValue = (field, value) => {
+    const q = (value || "").trim().toLowerCase();
+    if (!q) return null;
+    const matches = allEntries.filter(
+      (e) => e[field] && e[field].trim().toLowerCase() === q && e.color
+    );
+    if (matches.length === 0) return null;
+    return matches.reduce((a, b) => (b.dayKey > a.dayKey ? b : a)).color;
+  };
+
   const statsGeral = useMemo(() => {
     const total = allEntries.reduce((s, e) => s + (Number(e.value) || 0), 0);
     const recebido = allEntries
@@ -3049,7 +3059,11 @@ export default function PlantoesApp() {
                     <input
                       style={styles.input}
                       value={form.local}
-                      onChange={(e) => setForm((f) => ({ ...f, local: e.target.value }))}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const matchColor = colorForFieldValue("local", v);
+                        setForm((f) => ({ ...f, local: v, ...(matchColor ? { color: matchColor } : {}) }));
+                      }}
                       placeholder="ex: Hospital São Lucas"
                       list="dl-local"
                     />
@@ -3095,7 +3109,11 @@ export default function PlantoesApp() {
                     <input
                       style={styles.input}
                       value={form.local}
-                      onChange={(e) => setForm((f) => ({ ...f, local: e.target.value }))}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const matchColor = colorForFieldValue("local", v);
+                        setForm((f) => ({ ...f, local: v, ...(matchColor ? { color: matchColor } : {}) }));
+                      }}
                       placeholder="ex: Congresso Brasileiro de Cardiologia"
                       list="dl-local"
                     />
@@ -3104,7 +3122,11 @@ export default function PlantoesApp() {
                     <input
                       style={styles.input}
                       value={form.empresa}
-                      onChange={(e) => setForm((f) => ({ ...f, empresa: e.target.value }))}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const matchColor = colorForFieldValue("empresa", v);
+                        setForm((f) => ({ ...f, empresa: v, ...(matchColor ? { color: matchColor } : {}) }));
+                      }}
                       placeholder="ex: Sociedade Brasileira de Cardiologia"
                       list="dl-empresa"
                     />
@@ -3116,7 +3138,11 @@ export default function PlantoesApp() {
                     <input
                       style={styles.input}
                       value={form.empresa}
-                      onChange={(e) => setForm((f) => ({ ...f, empresa: e.target.value }))}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const matchColor = colorForFieldValue("empresa", v);
+                        setForm((f) => ({ ...f, empresa: v, ...(matchColor ? { color: matchColor } : {}) }));
+                      }}
                       placeholder="ex: Vida Ambulâncias"
                       list="dl-empresa"
                     />
