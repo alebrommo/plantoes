@@ -846,6 +846,7 @@ export default function PlantoesApp() {
   const [selectedDay, setSelectedDay] = useState(null); // "YYYY-MM-DD"
   const [viewDay, setViewDay] = useState(() => todayKey()); // dia exibido no painel abaixo do calendário
   const [calendarView, setCalendarView] = useState("mes"); // "mes" | "semana" | "dia"
+  const [expandedWeekIdx, setExpandedWeekIdx] = useState(null); // qual semana está expandida na comparação por semana
   const activeDay = viewDay || todayKey();
   const [draggedEntry, setDraggedEntry] = useState(null); // { dayKey, id }
   const [dragOverDay, setDragOverDay] = useState(null);
@@ -1139,6 +1140,7 @@ export default function PlantoesApp() {
         recebido = 0,
         pendente = 0,
         count = 0;
+      const items = [];
       rowDays.forEach((d) => {
         const dayKey = keyFor(cursor.year, cursor.month, d);
         (entries[dayKey] || []).forEach((e) => {
@@ -1147,6 +1149,7 @@ export default function PlantoesApp() {
           count += 1;
           if (e.pago) recebido += v;
           else pendente += v;
+          items.push({ dayKey, ...e });
         });
       });
       const first = rowDays[0];
@@ -1157,6 +1160,7 @@ export default function PlantoesApp() {
         recebido,
         pendente,
         count,
+        items: items.sort((a, b) => a.dayKey.localeCompare(b.dayKey)),
       });
     }
     return weeks;
@@ -3101,22 +3105,76 @@ export default function PlantoesApp() {
               <div style={styles.weekCompareList}>
                 {weeklyTotals.map((w, i) => {
                   const maxTotal = Math.max(1, ...weeklyTotals.map((x) => x.total));
+                  const isExpanded = expandedWeekIdx === i;
                   return (
-                    <div key={i} style={styles.weekCompareRow}>
-                      <div style={styles.weekCompareTop}>
-                        <span style={styles.weekCompareLabel}>
-                          semana {i + 1} <span style={styles.weekCompareDates}>({w.label})</span>
-                        </span>
-                        <span style={styles.weekCompareValue}>{currency(w.total)}</span>
+                    <div key={i}>
+                      <div
+                        style={{ ...styles.weekCompareRow, cursor: "pointer" }}
+                        onClick={() => setExpandedWeekIdx((prev) => (prev === i ? null : i))}
+                      >
+                        <div style={styles.weekCompareTop}>
+                          <span style={styles.weekCompareLabel}>
+                            semana {i + 1} <span style={styles.weekCompareDates}>({w.label})</span>
+                          </span>
+                          <span style={styles.weekCompareValue}>{currency(w.total)}</span>
+                        </div>
+                        <div style={styles.weekCompareBarTrack}>
+                          <div
+                            style={{
+                              ...styles.weekCompareBarFill,
+                              width: `${(w.total / maxTotal) * 100}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                      <div style={styles.weekCompareBarTrack}>
-                        <div
-                          style={{
-                            ...styles.weekCompareBarFill,
-                            width: `${(w.total / maxTotal) * 100}%`,
-                          }}
-                        />
-                      </div>
+                      {isExpanded && (
+                        <div style={styles.weekCompareSummary}>
+                          {w.items.length === 0 ? (
+                            <div style={styles.dayPanelEmpty}>Nenhum registro nessa semana.</div>
+                          ) : (
+                            w.items.map((e) => (
+                              <button
+                                key={e.id}
+                                type="button"
+                                className="btn-lift"
+                                style={styles.dayPanelItem}
+                                onClick={() => openEditModal(e.dayKey, e)}
+                              >
+                                <span style={styles.dayPanelItemIcon}>
+                                  {e.type === "plantao" ? (
+                                    <Stethoscope size={15} />
+                                  ) : e.type === "evento" ? (
+                                    <Presentation size={15} />
+                                  ) : (
+                                    <Truck size={15} />
+                                  )}
+                                </span>
+                                <span style={styles.dayPanelItemBody}>
+                                  <span style={styles.dayPanelItemTitle}>
+                                    {e.type === "remocao"
+                                      ? e.empresa || "remoção"
+                                      : e.local || (e.type === "evento" ? "evento" : "plantão")}
+                                  </span>
+                                  <span style={styles.dayPanelItemSub}>
+                                    {formatShortWithWeekday(e.dayKey)}
+                                  </span>
+                                </span>
+                                <span style={styles.dayPanelItemRight}>
+                                  <span style={styles.dayPanelItemValue}>{currency(e.value)}</span>
+                                  <span
+                                    style={{
+                                      ...styles.dayPanelBadge,
+                                      ...(e.pago ? styles.dayPanelBadgePago : styles.dayPanelBadgePendente),
+                                    }}
+                                  >
+                                    {e.pago ? "pago" : "a receber"}
+                                  </span>
+                                </span>
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -4912,6 +4970,14 @@ const styles = {
     height: "100%",
     borderRadius: 4,
     background: "#2D6E6E",
+  },
+  weekCompareSummary: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    marginTop: 8,
+    paddingLeft: 4,
+    borderLeft: "2px solid #E0DDD3",
   },
   dragHint: {
     fontSize: 11,
