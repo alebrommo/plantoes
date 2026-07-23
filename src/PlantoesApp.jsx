@@ -1194,6 +1194,22 @@ export default function PlantoesApp() {
     return list;
   }, [entries]);
 
+  const fieldSuggestions = useMemo(() => {
+    const sets = { local: new Set(), empresa: new Set(), paciente: new Set(), origem: new Set(), destino: new Set() };
+    allEntries.forEach((e) => {
+      ["local", "empresa", "paciente", "origem", "destino"].forEach((key) => {
+        if (e[key] && e[key].trim()) sets[key].add(e[key].trim());
+      });
+    });
+    return {
+      local: [...sets.local].sort(),
+      empresa: [...sets.empresa].sort(),
+      paciente: [...sets.paciente].sort(),
+      origem: [...sets.origem].sort(),
+      destino: [...sets.destino].sort(),
+    };
+  }, [allEntries]);
+
   const statsGeral = useMemo(() => {
     const total = allEntries.reduce((s, e) => s + (Number(e.value) || 0), 0);
     const recebido = allEntries
@@ -3035,6 +3051,7 @@ export default function PlantoesApp() {
                       value={form.local}
                       onChange={(e) => setForm((f) => ({ ...f, local: e.target.value }))}
                       placeholder="ex: Hospital São Lucas"
+                      list="dl-local"
                     />
                   </Field>
                 </>
@@ -3080,6 +3097,7 @@ export default function PlantoesApp() {
                       value={form.local}
                       onChange={(e) => setForm((f) => ({ ...f, local: e.target.value }))}
                       placeholder="ex: Congresso Brasileiro de Cardiologia"
+                      list="dl-local"
                     />
                   </Field>
                   <Field icon={<Building2 size={14} />} label="Nome da empresa">
@@ -3088,6 +3106,7 @@ export default function PlantoesApp() {
                       value={form.empresa}
                       onChange={(e) => setForm((f) => ({ ...f, empresa: e.target.value }))}
                       placeholder="ex: Sociedade Brasileira de Cardiologia"
+                      list="dl-empresa"
                     />
                   </Field>
                 </>
@@ -3099,6 +3118,7 @@ export default function PlantoesApp() {
                       value={form.empresa}
                       onChange={(e) => setForm((f) => ({ ...f, empresa: e.target.value }))}
                       placeholder="ex: Vida Ambulâncias"
+                      list="dl-empresa"
                     />
                   </Field>
                   <Field icon={<User size={14} />} label="Paciente (opcional)">
@@ -3107,6 +3127,7 @@ export default function PlantoesApp() {
                       value={form.paciente}
                       onChange={(e) => setForm((f) => ({ ...f, paciente: e.target.value }))}
                       placeholder="identificação opcional"
+                      list="dl-paciente"
                     />
                   </Field>
                   <Field icon={<MapPin size={14} />} label="Origem → destino (opcional)">
@@ -3116,12 +3137,14 @@ export default function PlantoesApp() {
                         value={form.origem}
                         onChange={(e) => setForm((f) => ({ ...f, origem: e.target.value }))}
                         placeholder="origem"
+                        list="dl-origem"
                       />
                       <input
                         style={styles.input}
                         value={form.destino}
                         onChange={(e) => setForm((f) => ({ ...f, destino: e.target.value }))}
                         placeholder="destino"
+                        list="dl-destino"
                       />
                     </div>
                   </Field>
@@ -3163,6 +3186,32 @@ export default function PlantoesApp() {
                 />
               </Field>
             </div>
+
+            <datalist id="dl-local">
+              {fieldSuggestions.local.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+            <datalist id="dl-empresa">
+              {fieldSuggestions.empresa.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+            <datalist id="dl-paciente">
+              {fieldSuggestions.paciente.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+            <datalist id="dl-origem">
+              {fieldSuggestions.origem.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
+            <datalist id="dl-destino">
+              {fieldSuggestions.destino.map((v) => (
+                <option key={v} value={v} />
+              ))}
+            </datalist>
 
             {duplicating ? (
               <div style={styles.duplicateRow}>
