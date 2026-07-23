@@ -511,6 +511,8 @@ const emptyForm = {
   obs: "",
   color: null,
   pago: false,
+  temRemocao: false,
+  valorRemocao: "",
 };
 
 const PDF_PAGE_W = 595;
@@ -1697,7 +1699,12 @@ export default function PlantoesApp() {
   const openEditModal = (dayKey, entry) => {
     setSelectedDay(dayKey);
     setEditingId(entry.id);
-    setForm({ ...emptyForm, ...entry, value: String(entry.value) });
+    setForm({
+      ...emptyForm,
+      ...entry,
+      value: String(entry.valorPlantao ?? entry.value),
+      valorRemocao: entry.valorRemocao ? String(entry.valorRemocao) : "",
+    });
     setDuplicating(false);
     setModalOpen(true);
   };
@@ -1773,11 +1780,14 @@ export default function PlantoesApp() {
       showToast("Supabase não configurado", "error");
       return;
     }
-    const value = parseBRL(form.value);
-    if (!value || value <= 0) {
+    const baseValue = parseBRL(form.value);
+    if (!baseValue || baseValue <= 0) {
       showToast("Informe um valor válido em R$", "error");
       return;
     }
+    const isHapvida = form.type === "plantao" && form.local.trim().toUpperCase().includes("HAPVIDA");
+    const remocaoExtra = isHapvida && form.temRemocao ? parseBRL(form.valorRemocao) || 0 : 0;
+    const value = baseValue + remocaoExtra;
     if (form.type === "plantao" && !form.local.trim()) {
       showToast("Informe o local / hospital", "error");
       return;
@@ -3113,6 +3123,34 @@ export default function PlantoesApp() {
                       placeholder="ex: Hospital São Lucas"
                     />
                   </Field>
+
+                  {form.local.trim().toUpperCase().includes("HAPVIDA") && (
+                    <div style={styles.field}>
+                      <label style={styles.checkboxRow}>
+                        <input
+                          type="checkbox"
+                          checked={!!form.temRemocao}
+                          onChange={(e) => setForm((f) => ({ ...f, temRemocao: e.target.checked }))}
+                          style={styles.checkboxInput}
+                        />
+                        <span style={styles.checkboxLabel}>
+                          <Truck size={15} color={form.temRemocao ? "#B5541F" : "#8C6D1B"} />
+                          Teve remoção nesse plantão?
+                        </span>
+                      </label>
+                      {form.temRemocao && (
+                        <Field icon={<Truck size={14} />} label="Valor da remoção (somado ao plantão)">
+                          <input
+                            style={{ ...styles.input, fontFamily: "'IBM Plex Mono', monospace" }}
+                            value={form.valorRemocao}
+                            onChange={(e) => setForm((f) => ({ ...f, valorRemocao: e.target.value }))}
+                            placeholder="0,00"
+                            inputMode="decimal"
+                          />
+                        </Field>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : form.type === "evento" ? (
                 <>
