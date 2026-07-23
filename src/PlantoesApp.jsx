@@ -94,6 +94,17 @@ function saveQueue(uid, queue) {
   }
 }
 
+// Cada remoção de um plantão HAPVIDA guarda { valor, pago } — normaliza também
+// o formato antigo (array de números) salvo antes dessa mudança.
+function normalizeRemocoes(remocoes) {
+  if (!Array.isArray(remocoes)) return [];
+  return remocoes.map((r) =>
+    r && typeof r === "object"
+      ? { valor: Number(r.valor) || 0, pago: !!r.pago }
+      : { valor: Number(r) || 0, pago: false }
+  );
+}
+
 // Converte uma linha da tabela `entries` (Supabase) no formato de registro
 // que o resto do componente já usa (camelCase, sem colunas nulas do outro tipo).
 function rowToEntry(row) {
@@ -114,7 +125,7 @@ function rowToEntry(row) {
       fH: row.f_h,
       fM: row.f_m,
       turno: row.turno,
-      remocoes: Array.isArray(row.remocoes) ? row.remocoes : [],
+      remocoes: normalizeRemocoes(row.remocoes),
     };
   }
   if (row.type === "evento") {
@@ -705,12 +716,13 @@ function buildPdfBlob(data) {
   return assemblePdfFromPages(buildPdfPages(data));
 }
 
-const EXPORT_COL_LABEL = { data: "Data", nome: "Nome", empresa: "Empresa", pago: "Pago", valor: "Valor" };
-const EXPORT_COL_ORDER = ["data", "nome", "empresa", "pago", "valor"];
+const EXPORT_COL_LABEL = { data: "Data", nome: "Nome", empresa: "Empresa", pago: "Pago", valor: "Valor", obs: "Observação" };
+const EXPORT_COL_ORDER = ["data", "nome", "empresa", "pago", "valor", "obs"];
 
 function getSearchColText(e, key) {
   if (key === "data") return formatShort(e.dayKey);
   if (key === "nome") {
+    if (e.isSubRemocao) return `Remoção (${e.empresa})`;
     if (e.type === "remocao") return e.empresa || "remoção";
     if (e.type === "evento") return e.local || "evento";
     return e.local || "plantão";
@@ -718,6 +730,7 @@ function getSearchColText(e, key) {
   if (key === "empresa") return e.type === "plantao" ? "—" : e.empresa || "—";
   if (key === "pago") return e.pago ? "Pago" : "A receber";
   if (key === "valor") return currency(e.value);
+  if (key === "obs") return (e.obs || "").replace(/\s+/g, " ").trim();
   return "";
 }
 
@@ -763,7 +776,12 @@ function buildSearchPdfPages(results, colsSelected) {
       );
     } else {
       cols.forEach((k, i) => {
-        const text = k === "nome" ? truncatePdf(getSearchColText(e, k), 30) : getSearchColText(e, k);
+        const text =
+          k === "nome"
+            ? truncatePdf(getSearchColText(e, k), 30)
+            : k === "obs"
+            ? truncatePdf(getSearchColText(e, k), 40)
+            : getSearchColText(e, k);
         page.push(pdfTextOp(colX[i], y, 9, "F1", text, PDF_DARK));
       });
     }
@@ -854,6 +872,7 @@ export default function PlantoesApp() {
     empresa: true,
     pago: true,
     valor: true,
+    obs: false,
   });
   const [searchPdfLoading, setSearchPdfLoading] = useState(false);
   const [searchExcelLoading, setSearchExcelLoading] = useState(false);
@@ -1363,31 +1382,60 @@ export default function PlantoesApp() {
   const searchResults = useMemo(() => {
     const nameQ = normText(searchName.trim());
     const results = [];
+
+    const matchesFilters = (item, haystackText) => {
+      if (searchType !== "todos" && item.type !== searchType) return false;
+      if (searchPaid === "pago" && !item.pago) return false;
+      if (searchPaid === "pendente" && item.pago) return false;
+      if (nameQ && !normText(haystackText).includes(nameQ)) return false;
+      return true;
+    };
+
     Object.keys(entries)
       .filter((dayKey) => !searchStart || dayKey >= searchStart)
       .filter((dayKey) => !searchEnd || dayKey <= searchEnd)
       .sort()
       .forEach((dayKey) => {
         entries[dayKey].forEach((e) => {
-          if (searchType !== "todos" && e.type !== searchType) return;
-          if (searchPaid === "pago" && !e.pago) return;
-          if (searchPaid === "pendente" && e.pago) return;
-          if (nameQ) {
-            const haystack = normText(
-              [
-                e.type === "remocao" ? e.empresa : e.local,
-                e.empresa,
-                e.paciente,
-                e.origem,
-                e.destino,
-                stripHtml(e.obs),
-              ]
-                .filter(Boolean)
-                .join(" ")
-            );
-            if (!haystack.includes(nameQ)) return;
+          const remocoes = e.type === "plantao" ? e.remocoes || [] : [];
+          const remocoesTotal = remocoes.reduce((s, r) => s + (Number(r.valor) || 0), 0);
+
+          const haystack = [
+            e.type === "remocao" ? e.empresa : e.local,
+            e.empresa,
+            e.paciente,
+            e.origem,
+            e.destino,
+            stripHtml(e.obs),
+          ]
+            .filter(Boolean)
+            .join(" ");
+
+          if (matchesFilters(e, haystack)) {
+            // se tiver remoções embutidas, o valor aqui é só a parte do plantão —
+            // as remoções entram como linhas próprias abaixo, para não contar em dobro.
+            results.push({
+              dayKey,
+              ...e,
+              value: remocoes.length ? e.value - remocoesTotal : e.value,
+            });
           }
-          results.push({ dayKey, ...e });
+
+          remocoes.forEach((r, idx) => {
+            const sub = {
+              dayKey,
+              id: `${e.id}__rem${idx}`,
+              type: "remocao",
+              value: r.valor,
+              pago: r.pago,
+              empresa: e.local || "HAPVIDA",
+              isSubRemocao: true,
+              parentId: e.id,
+              parentDayKey: dayKey,
+              parentIndex: idx,
+            };
+            if (matchesFilters(sub, sub.empresa)) results.push(sub);
+          });
         });
       });
     return results.slice(0, 300);
@@ -1396,7 +1444,12 @@ export default function PlantoesApp() {
   const goToSearchResult = (result) => {
     const [y, m] = result.dayKey.split("-").map(Number);
     setCursor({ year: y, month: m - 1 });
-    openEditModal(result.dayKey, result);
+    if (result.isSubRemocao) {
+      const parent = (entries[result.parentDayKey] || []).find((e) => e.id === result.parentId);
+      if (parent) openEditModal(result.parentDayKey, parent);
+    } else {
+      openEditModal(result.dayKey, result);
+    }
     setActiveTab("calendario");
   };
 
@@ -1448,6 +1501,44 @@ export default function PlantoesApp() {
         );
       },
     });
+  };
+
+  // Cada remoção embutida num plantão HAPVIDA tem seu próprio status de pago —
+  // isso atualiza só aquela remoção dentro do array `remocoes` do plantão (grupo) dela.
+  const toggleRemocaoPago = async (result) => {
+    if (!supabaseConfigured) {
+      showToast("Supabase não configurado", "error");
+      return;
+    }
+    const day = result.parentDayKey;
+    const parent = (entries[day] || []).find((e) => e.id === result.parentId);
+    if (!parent) return;
+    const applyToggle = (remocoes) =>
+      remocoes.map((r, i) => (i === result.parentIndex ? { ...r, pago: !r.pago } : r));
+
+    const nextRemocoes = applyToggle(parent.remocoes || []);
+    const updatedParent = { ...parent, remocoes: nextRemocoes };
+    setEntries((prev) => {
+      const list = prev[day] || [];
+      const idx = list.findIndex((e) => e.id === parent.id);
+      if (idx === -1) return prev;
+      const updated = [...list];
+      updated[idx] = updatedParent;
+      return { ...prev, [day]: updated };
+    });
+    const outcome = await runOrQueue(
+      () => supabase.from(TABLE).update({ remocoes: nextRemocoes }).eq("id", parent.id),
+      { kind: "upsert", row: entryToRow(day, updatedParent, userId) }
+    );
+    if (outcome.status === "error") {
+      setSaveError(true);
+      showToast("Não foi possível salvar", "error");
+      return;
+    }
+    showToast(
+      outcome.status === "queued" ? "Salvo offline — sincroniza quando reconectar" : "Status da remoção atualizado",
+      "success"
+    );
   };
 
   const toggleExportCol = (key) => {
@@ -1502,7 +1593,7 @@ export default function PlantoesApp() {
         sheetData.push(totalRow);
       }
       const ws = XLSX.utils.aoa_to_sheet(sheetData);
-      ws["!cols"] = activeCols.map(() => ({ wch: 20 }));
+      ws["!cols"] = activeCols.map((k) => ({ wch: k === "obs" ? 40 : 20 }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Busca");
       const wbArray = XLSX.write(wb, { bookType: "xlsx", type: "array" });
@@ -1702,13 +1793,13 @@ export default function PlantoesApp() {
   const openEditModal = (dayKey, entry) => {
     setSelectedDay(dayKey);
     setEditingId(entry.id);
-    const remocoes = Array.isArray(entry.remocoes) ? entry.remocoes : [];
-    const remocoesTotal = remocoes.reduce((s, v) => s + (Number(v) || 0), 0);
+    const remocoes = normalizeRemocoes(entry.remocoes);
+    const remocoesTotal = remocoes.reduce((s, r) => s + r.valor, 0);
     setForm({
       ...emptyForm,
       ...entry,
       value: String(entry.value - remocoesTotal),
-      remocoes: remocoes.map((v) => String(v)),
+      remocoes: remocoes.map((r) => ({ valor: String(r.valor), pago: r.pago })),
     });
     setDuplicating(false);
     setModalOpen(true);
@@ -1791,10 +1882,12 @@ export default function PlantoesApp() {
       return;
     }
     const isHapvida = form.type === "plantao" && form.local.trim().toUpperCase().includes("HAPVIDA");
-    const remocaoValues = isHapvida
-      ? form.remocoes.map((v) => parseBRL(v)).filter((v) => v > 0)
+    const remocaoObjs = isHapvida
+      ? form.remocoes
+          .map((r) => ({ valor: parseBRL(r.valor) || 0, pago: !!r.pago }))
+          .filter((r) => r.valor > 0)
       : [];
-    const remocaoExtra = remocaoValues.reduce((s, v) => s + v, 0);
+    const remocaoExtra = remocaoObjs.reduce((s, r) => s + r.valor, 0);
     const value = baseValue + remocaoExtra;
     if (form.type === "plantao" && !form.local.trim()) {
       showToast("Informe o local / hospital", "error");
@@ -1828,7 +1921,7 @@ export default function PlantoesApp() {
             fM: form.fM,
             turno: `${form.iH}:${form.iM} – ${form.fH}:${form.fM}`,
             obs: form.obs,
-            remocoes: remocaoValues,
+            remocoes: remocaoObjs,
           }
         : form.type === "evento"
         ? {
@@ -2460,6 +2553,9 @@ export default function PlantoesApp() {
                           <th style={{ ...styles.searchTh, ...styles.searchThBold, textAlign: "right" }}>
                             Valor
                           </th>
+                          {exportCols.obs && (
+                            <th style={{ ...styles.searchTh, ...styles.searchThBold }}>Observação</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody>
@@ -2474,12 +2570,14 @@ export default function PlantoesApp() {
                           >
                             <td style={styles.searchTd}>{formatShortWithWeekday(r.dayKey)}</td>
                             <td style={styles.searchTdName}>
-                              {r.type === "remocao"
+                              {r.isSubRemocao
+                                ? `Remoção (${r.empresa})`
+                                : r.type === "remocao"
                                 ? r.empresa || "remoção"
                                 : r.local || (r.type === "evento" ? "evento" : "plantão")}
                             </td>
                             <td style={styles.searchTdName}>
-                              {r.type === "plantao" ? "—" : r.empresa || "—"}
+                              {r.type === "plantao" && !r.isSubRemocao ? "—" : r.empresa || "—"}
                             </td>
                             <td style={{ ...styles.searchTd, textAlign: "center" }}>
                               <button
@@ -2487,7 +2585,8 @@ export default function PlantoesApp() {
                                 style={styles.searchPagoBtn}
                                 onClick={(evt) => {
                                   evt.stopPropagation();
-                                  toggleEntryPago(r);
+                                  if (r.isSubRemocao) toggleRemocaoPago(r);
+                                  else toggleEntryPago(r);
                                 }}
                                 title={r.pago ? "Marcar como a receber" : "Marcar como pago"}
                               >
@@ -2507,6 +2606,9 @@ export default function PlantoesApp() {
                             >
                               {currency(r.value)}
                             </td>
+                            {exportCols.obs && (
+                              <td style={styles.searchTdName}>{getSearchColText(r, "obs") || "—"}</td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -3139,21 +3241,40 @@ export default function PlantoesApp() {
                         <Truck size={14} />
                         <span>Remoções deste plantão (opcional)</span>
                       </div>
-                      {form.remocoes.map((v, idx) => (
+                      {form.remocoes.map((r, idx) => (
                         <div key={idx} style={styles.rowFields}>
                           <input
                             style={{ ...styles.input, fontFamily: "'IBM Plex Mono', monospace" }}
-                            value={v}
+                            value={r.valor}
                             onChange={(e) =>
                               setForm((f) => {
                                 const next = [...f.remocoes];
-                                next[idx] = e.target.value;
+                                next[idx] = { ...next[idx], valor: e.target.value };
                                 return { ...f, remocoes: next };
                               })
                             }
                             placeholder={`Remoção ${idx + 1} — 0,00`}
                             inputMode="decimal"
                           />
+                          <button
+                            type="button"
+                            className="btn-icon"
+                            style={{
+                              ...styles.remocaoPagoBtn,
+                              ...(r.pago ? styles.remocaoPagoBtnActive : {}),
+                            }}
+                            onClick={() =>
+                              setForm((f) => {
+                                const next = [...f.remocoes];
+                                next[idx] = { ...next[idx], pago: !next[idx].pago };
+                                return { ...f, remocoes: next };
+                              })
+                            }
+                            title={r.pago ? "Remoção paga" : "Marcar remoção como paga"}
+                          >
+                            {r.pago ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+                            {r.pago ? "paga" : "a receber"}
+                          </button>
                           <button
                             type="button"
                             className="btn-icon"
@@ -3174,19 +3295,12 @@ export default function PlantoesApp() {
                         type="button"
                         className="btn-lift"
                         style={styles.addRemocaoBtn}
-                        onClick={() => setForm((f) => ({ ...f, remocoes: [...f.remocoes, ""] }))}
+                        onClick={() =>
+                          setForm((f) => ({ ...f, remocoes: [...f.remocoes, { valor: "", pago: false }] }))
+                        }
                       >
                         <Plus size={13} /> adicionar remoção
                       </button>
-                      {form.remocoes.length > 0 && (
-                        <div style={styles.remocaoTotal}>
-                          Total (plantão + remoções):{" "}
-                          {currency(
-                            (parseBRL(form.value) || 0) +
-                              form.remocoes.reduce((s, v) => s + (parseBRL(v) || 0), 0)
-                          )}
-                        </div>
-                      )}
                     </div>
                   )}
                 </>
@@ -3298,6 +3412,18 @@ export default function PlantoesApp() {
                   inputMode="decimal"
                 />
               </Field>
+
+              {form.type === "plantao" &&
+                form.local.trim().toUpperCase().includes("HAPVIDA") &&
+                form.remocoes.length > 0 && (
+                  <div style={styles.remocaoTotal}>
+                    Total (plantão + remoções):{" "}
+                    {currency(
+                      (parseBRL(form.value) || 0) +
+                        form.remocoes.reduce((s, r) => s + (parseBRL(r.valor) || 0), 0)
+                    )}
+                  </div>
+                )}
 
               <label style={styles.checkboxRow}>
                 <input
@@ -5022,6 +5148,26 @@ const styles = {
     color: "#B5541F",
     borderRadius: 8,
     cursor: "pointer",
+  },
+  remocaoPagoBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+    border: "1px solid #E9D9B4",
+    background: "#F6EFDD",
+    color: "#8C6D1B",
+    borderRadius: 8,
+    padding: "0 10px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  remocaoPagoBtnActive: {
+    border: "1px solid #B7DDC3",
+    background: "#E2F2E7",
+    color: "#206B3C",
   },
   addRemocaoBtn: {
     display: "flex",
