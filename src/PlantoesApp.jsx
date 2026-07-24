@@ -847,6 +847,7 @@ export default function PlantoesApp() {
   const [viewDay, setViewDay] = useState(() => todayKey()); // dia exibido no painel abaixo do calendário
   const [calendarView, setCalendarView] = useState("mes"); // "mes" | "semana" | "dia"
   const [expandedWeekIdx, setExpandedWeekIdx] = useState(null); // qual semana está expandida na comparação por semana
+  const [weekFilterQuery, setWeekFilterQuery] = useState("");
   const activeDay = viewDay || todayKey();
   const [draggedEntry, setDraggedEntry] = useState(null); // { dayKey, id }
   const [dragOverDay, setDragOverDay] = useState(null);
@@ -3110,7 +3111,10 @@ export default function PlantoesApp() {
                     <div key={i}>
                       <div
                         style={{ ...styles.weekCompareRow, cursor: "pointer" }}
-                        onClick={() => setExpandedWeekIdx((prev) => (prev === i ? null : i))}
+                        onClick={() => {
+                          setExpandedWeekIdx((prev) => (prev === i ? null : i));
+                          setWeekFilterQuery("");
+                        }}
                       >
                         <div style={styles.weekCompareTop}>
                           <span style={styles.weekCompareLabel}>
@@ -3128,11 +3132,40 @@ export default function PlantoesApp() {
                         </div>
                       </div>
                       {isExpanded && (
-                        <div style={styles.weekCompareSummary}>
-                          {w.items.length === 0 ? (
-                            <div style={styles.dayPanelEmpty}>Nenhum registro nessa semana.</div>
-                          ) : (
-                            w.items.map((e) => (
+                        <div style={styles.weekCompareSummary} onClick={(evt) => evt.stopPropagation()}>
+                          {w.items.length > 0 && (
+                            <div style={styles.weekFilterWrap}>
+                              <Search size={13} style={styles.weekFilterIcon} />
+                              <input
+                                type="text"
+                                style={styles.weekFilterInput}
+                                value={weekFilterQuery}
+                                onChange={(e) => setWeekFilterQuery(e.target.value)}
+                                placeholder="Filtrar por plantão, remoção ou empresa…"
+                              />
+                            </div>
+                          )}
+                          {(() => {
+                            const q = normText(weekFilterQuery.trim());
+                            const filteredItems = q
+                              ? w.items.filter((e) =>
+                                  normText(
+                                    [
+                                      e.type === "remocao" ? e.empresa : e.local,
+                                      e.empresa,
+                                    ]
+                                      .filter(Boolean)
+                                      .join(" ")
+                                  ).includes(q)
+                                )
+                              : w.items;
+                            if (w.items.length === 0) {
+                              return <div style={styles.dayPanelEmpty}>Nenhum registro nessa semana.</div>;
+                            }
+                            if (filteredItems.length === 0) {
+                              return <div style={styles.dayPanelEmpty}>Nada encontrado com esse filtro.</div>;
+                            }
+                            return filteredItems.map((e) => (
                               <button
                                 key={e.id}
                                 type="button"
@@ -3171,8 +3204,8 @@ export default function PlantoesApp() {
                                   </span>
                                 </span>
                               </button>
-                            ))
-                          )}
+                            ));
+                          })()}
                         </div>
                       )}
                     </div>
@@ -4978,6 +5011,28 @@ const styles = {
     marginTop: 8,
     paddingLeft: 4,
     borderLeft: "2px solid #E0DDD3",
+  },
+  weekFilterWrap: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    border: "1px solid #E0DDD3",
+    borderRadius: 8,
+    padding: "6px 10px",
+    background: "#fff",
+    marginBottom: 2,
+  },
+  weekFilterIcon: {
+    color: "#8A8578",
+    flexShrink: 0,
+  },
+  weekFilterInput: {
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    fontSize: 12.5,
+    color: "#1C2B39",
+    width: "100%",
   },
   dragHint: {
     fontSize: 11,
