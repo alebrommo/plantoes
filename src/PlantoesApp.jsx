@@ -94,14 +94,14 @@ function saveQueue(uid, queue) {
   }
 }
 
-// Cada remoção de um plantão HAPVIDA guarda { valor, pago } — normaliza também
-// o formato antigo (array de números) salvo antes dessa mudança.
+// Cada remoção de um plantão HAPVIDA guarda { valor, pago, obs } — normaliza também
+// o formato antigo (array de números, ou sem obs) salvo antes dessas mudanças.
 function normalizeRemocoes(remocoes) {
   if (!Array.isArray(remocoes)) return [];
   return remocoes.map((r) =>
     r && typeof r === "object"
-      ? { valor: Number(r.valor) || 0, pago: !!r.pago }
-      : { valor: Number(r) || 0, pago: false }
+      ? { valor: Number(r.valor) || 0, pago: !!r.pago, obs: r.obs || "" }
+      : { valor: Number(r) || 0, pago: false, obs: "" }
   );
 }
 
@@ -1433,13 +1433,14 @@ export default function PlantoesApp() {
               type: "remocao",
               value: r.valor,
               pago: r.pago,
+              obs: r.obs || "",
               empresa: e.local || "HAPVIDA",
               isSubRemocao: true,
               parentId: e.id,
               parentDayKey: dayKey,
               parentIndex: idx,
             };
-            if (matchesFilters(sub, sub.empresa)) results.push(sub);
+            if (matchesFilters(sub, [sub.empresa, sub.obs].filter(Boolean).join(" "))) results.push(sub);
           });
         });
       });
@@ -1804,7 +1805,7 @@ export default function PlantoesApp() {
       ...emptyForm,
       ...entry,
       value: String(entry.value - remocoesTotal),
-      remocoes: remocoes.map((r) => ({ valor: String(r.valor), pago: r.pago })),
+      remocoes: remocoes.map((r) => ({ valor: String(r.valor), pago: r.pago, obs: r.obs || "" })),
     });
     setDuplicating(false);
     setModalOpen(true);
@@ -1889,7 +1890,7 @@ export default function PlantoesApp() {
     const isHapvida = form.type === "plantao" && form.local.trim().toUpperCase().includes("HAPVIDA");
     const remocaoObjs = isHapvida
       ? form.remocoes
-          .map((r) => ({ valor: parseBRL(r.valor) || 0, pago: !!r.pago }))
+          .map((r) => ({ valor: parseBRL(r.valor) || 0, pago: !!r.pago, obs: (r.obs || "").trim() }))
           .filter((r) => r.valor > 0)
       : [];
     const remocaoExtra = remocaoObjs.reduce((s, r) => s + r.valor, 0);
@@ -3333,53 +3334,67 @@ export default function PlantoesApp() {
                         <span>Remoções deste plantão (opcional)</span>
                       </div>
                       {form.remocoes.map((r, idx) => (
-                        <div key={idx} style={styles.rowFields}>
+                        <div key={idx} style={styles.remocaoGroup}>
+                          <div style={styles.rowFields}>
+                            <input
+                              style={{ ...styles.input, fontFamily: "'IBM Plex Mono', monospace" }}
+                              value={r.valor}
+                              onChange={(e) =>
+                                setForm((f) => {
+                                  const next = [...f.remocoes];
+                                  next[idx] = { ...next[idx], valor: e.target.value };
+                                  return { ...f, remocoes: next };
+                                })
+                              }
+                              placeholder={`Remoção ${idx + 1} — 0,00`}
+                              inputMode="decimal"
+                            />
+                            <button
+                              type="button"
+                              className="btn-icon"
+                              style={{
+                                ...styles.remocaoPagoBtn,
+                                ...(r.pago ? styles.remocaoPagoBtnActive : {}),
+                              }}
+                              onClick={() =>
+                                setForm((f) => {
+                                  const next = [...f.remocoes];
+                                  next[idx] = { ...next[idx], pago: !next[idx].pago };
+                                  return { ...f, remocoes: next };
+                                })
+                              }
+                              title={r.pago ? "Remoção paga" : "Marcar remoção como paga"}
+                            >
+                              {r.pago ? <CheckCircle2 size={14} /> : <Circle size={14} />}
+                              {r.pago ? "paga" : "a receber"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-icon"
+                              style={styles.removeRemocaoBtn}
+                              onClick={() =>
+                                setForm((f) => ({
+                                  ...f,
+                                  remocoes: f.remocoes.filter((_, i) => i !== idx),
+                                }))
+                              }
+                              aria-label="Remover essa remoção"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
                           <input
-                            style={{ ...styles.input, fontFamily: "'IBM Plex Mono', monospace" }}
-                            value={r.valor}
+                            style={styles.remocaoObsInput}
+                            value={r.obs}
                             onChange={(e) =>
                               setForm((f) => {
                                 const next = [...f.remocoes];
-                                next[idx] = { ...next[idx], valor: e.target.value };
+                                next[idx] = { ...next[idx], obs: e.target.value };
                                 return { ...f, remocoes: next };
                               })
                             }
-                            placeholder={`Remoção ${idx + 1} — 0,00`}
-                            inputMode="decimal"
+                            placeholder="Informação sobre a remoção (opcional)"
                           />
-                          <button
-                            type="button"
-                            className="btn-icon"
-                            style={{
-                              ...styles.remocaoPagoBtn,
-                              ...(r.pago ? styles.remocaoPagoBtnActive : {}),
-                            }}
-                            onClick={() =>
-                              setForm((f) => {
-                                const next = [...f.remocoes];
-                                next[idx] = { ...next[idx], pago: !next[idx].pago };
-                                return { ...f, remocoes: next };
-                              })
-                            }
-                            title={r.pago ? "Remoção paga" : "Marcar remoção como paga"}
-                          >
-                            {r.pago ? <CheckCircle2 size={14} /> : <Circle size={14} />}
-                            {r.pago ? "paga" : "a receber"}
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-icon"
-                            style={styles.removeRemocaoBtn}
-                            onClick={() =>
-                              setForm((f) => ({
-                                ...f,
-                                remocoes: f.remocoes.filter((_, i) => i !== idx),
-                              }))
-                            }
-                            aria-label="Remover essa remoção"
-                          >
-                            <X size={14} />
-                          </button>
                         </div>
                       ))}
                       <button
@@ -3387,7 +3402,10 @@ export default function PlantoesApp() {
                         className="btn-lift"
                         style={styles.addRemocaoBtn}
                         onClick={() =>
-                          setForm((f) => ({ ...f, remocoes: [...f.remocoes, { valor: "", pago: false }] }))
+                          setForm((f) => ({
+                            ...f,
+                            remocoes: [...f.remocoes, { valor: "", pago: false, obs: "" }],
+                          }))
                         }
                       >
                         <Plus size={13} /> adicionar remoção
@@ -5289,6 +5307,21 @@ const styles = {
     border: "1px solid #B7DDC3",
     background: "#E2F2E7",
     color: "#206B3C",
+  },
+  remocaoGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  remocaoObsInput: {
+    border: "1px solid #E0DDD3",
+    borderRadius: 8,
+    padding: "7px 10px",
+    fontSize: 12.5,
+    fontFamily: "'Inter', sans-serif",
+    color: "#1C2B39",
+    background: "#fff",
+    width: "100%",
   },
   addRemocaoBtn: {
     display: "flex",
