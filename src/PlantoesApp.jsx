@@ -44,6 +44,8 @@ import {
   Bold,
   Italic,
   List,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -848,7 +850,24 @@ export default function PlantoesApp() {
   const [calendarView, setCalendarView] = useState("mes"); // "mes" | "semana" | "dia"
   const [expandedWeekIdx, setExpandedWeekIdx] = useState(null); // qual semana está expandida na comparação por semana
   const [weekFilterQuery, setWeekFilterQuery] = useState("");
+  const [hideValues, setHideValues] = useState(() => {
+    try {
+      return localStorage.getItem("plantoes-hide-values") === "1";
+    } catch {
+      return false;
+    }
+  });
   const activeDay = viewDay || todayKey();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("plantoes-hide-values", hideValues ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [hideValues]);
+
+  const fmtValue = (n) => (hideValues ? "R$ ****" : currency(n));
   const [draggedEntry, setDraggedEntry] = useState(null); // { dayKey, id }
   const [dragOverDay, setDragOverDay] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -2187,6 +2206,14 @@ export default function PlantoesApp() {
           )}
           <button
             className="btn-lift"
+            style={styles.hideValuesBtn}
+            onClick={() => setHideValues((v) => !v)}
+            title={hideValues ? "Mostrar valores" : "Ocultar valores"}
+          >
+            {hideValues ? <EyeOff size={13} /> : <Eye size={13} />}
+          </button>
+          <button
+            className="btn-lift"
             style={styles.logoutBtn}
             onClick={() => supabase.auth.signOut()}
             title={session?.user?.email}
@@ -2236,16 +2263,16 @@ export default function PlantoesApp() {
           <div style={styles.searchWrap}>
             <div style={styles.summaryBar}>
               <StatCard label="registros no total" value={String(statsGeral.count)} />
-              <StatCard label="valor total" value={currency(statsGeral.total)} />
+              <StatCard label="valor total" value={fmtValue(statsGeral.total)} />
               <StatCard
                 label="recebido"
-                value={currency(statsGeral.recebido)}
+                value={fmtValue(statsGeral.recebido)}
                 color="#206B3C"
                 bg="#E2F2E7"
               />
               <StatCard
                 label="a receber"
-                value={currency(statsGeral.aReceber)}
+                value={fmtValue(statsGeral.aReceber)}
                 color="#8C6D1B"
                 bg="#F6EFDD"
               />
@@ -2271,7 +2298,7 @@ export default function PlantoesApp() {
                             <Cell key={t.id} fill={TYPE_CHART_COLORS[t.id]} />
                           ))}
                       </Pie>
-                      <Tooltip formatter={(v) => currency(v)} />
+                      <Tooltip formatter={(v) => fmtValue(v)} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
                     </PieChart>
                   </ResponsiveContainer>
@@ -2294,10 +2321,10 @@ export default function PlantoesApp() {
                       <tr key={t.id}>
                         <td style={styles.searchTdName}>{t.label}</td>
                         <td style={{ ...styles.searchTd, textAlign: "right" }}>{t.count}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(t.total)}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(t.recebido)}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(t.aReceber)}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(t.media)}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(t.total)}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(t.recebido)}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(t.aReceber)}</td>
+                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(t.media)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -2312,9 +2339,9 @@ export default function PlantoesApp() {
                   <ResponsiveContainer width="100%" height={Math.min(180, Math.max(90, statsPorEmpresaChart.length * 26))}>
                     <BarChart data={statsPorEmpresaChart} layout="vertical" margin={{ top: 2, left: 8, right: 12, bottom: 2 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                      <XAxis type="number" tickFormatter={(v) => currency(v)} fontSize={10} height={20} />
+                      <XAxis type="number" tickFormatter={(v) => fmtValue(v)} fontSize={10} height={20} />
                       <YAxis type="category" dataKey="empresa" width={90} fontSize={10} />
-                      <Tooltip formatter={(v) => currency(v)} />
+                      <Tooltip formatter={(v) => fmtValue(v)} />
                       <Bar dataKey="total" name="Total" fill="#1C2B39" radius={[0, 3, 3, 0]} barSize={14} />
                     </BarChart>
                   </ResponsiveContainer>
@@ -2339,9 +2366,9 @@ export default function PlantoesApp() {
                         <tr key={e.empresa}>
                           <td style={styles.searchTdName}>{e.empresa}</td>
                           <td style={{ ...styles.searchTd, textAlign: "right" }}>{e.count}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(e.total)}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(e.recebido)}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(e.aReceber)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(e.total)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(e.recebido)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(e.aReceber)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2358,8 +2385,8 @@ export default function PlantoesApp() {
                     <BarChart data={statsPorMesChart} margin={{ top: 2, left: 4, right: 8, bottom: 2 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} />
                       <XAxis dataKey="label" fontSize={10} />
-                      <YAxis tickFormatter={(v) => currency(v)} fontSize={10} width={60} />
-                      <Tooltip formatter={(v) => currency(v)} />
+                      <YAxis tickFormatter={(v) => fmtValue(v)} fontSize={10} width={60} />
+                      <Tooltip formatter={(v) => fmtValue(v)} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
                       <Bar dataKey="recebido" name="Recebido" stackId="v" fill="#2F8F52" barSize={16} />
                       <Bar dataKey="aReceber" name="A receber" stackId="v" fill="#B8912B" radius={[3, 3, 0, 0]} barSize={16} />
@@ -2390,9 +2417,9 @@ export default function PlantoesApp() {
                           <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.plantoes}</td>
                           <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.remocoes}</td>
                           <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.eventos}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(m.total)}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(m.recebido)}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{currency(m.aReceber)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(m.total)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(m.recebido)}</td>
+                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(m.aReceber)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2610,7 +2637,7 @@ export default function PlantoesApp() {
                                 ...(!r.pago ? styles.searchValuePending : {}),
                               }}
                             >
-                              {currency(r.value)}
+                              {fmtValue(r.value)}
                             </td>
                             {exportCols.obs && (
                               <td style={styles.searchTdName}>{getSearchColText(r, "obs") || "—"}</td>
@@ -2643,7 +2670,7 @@ export default function PlantoesApp() {
                               {g.label} ({items.length})
                             </span>
                             <span>
-                              {currency(items.reduce((s, r) => s + (Number(r.value) || 0), 0))}
+                              {fmtValue(items.reduce((s, r) => s + (Number(r.value) || 0), 0))}
                             </span>
                           </div>
                         );
@@ -2657,6 +2684,7 @@ export default function PlantoesApp() {
             {searchResults.length > 0 && (
               <div style={{ ...styles.summaryBar, marginTop: 12 }}>
                 <SummaryChip
+                  hideValues={hideValues}
                   icon={<Circle size={14} />}
                   label="a receber"
                   value={searchResults
@@ -2666,6 +2694,7 @@ export default function PlantoesApp() {
                   bg="#F6EFDD"
                 />
                 <SummaryChip
+                  hideValues={hideValues}
                   icon={<CheckCircle2 size={14} />}
                   label="pago"
                   value={searchResults
@@ -2675,6 +2704,7 @@ export default function PlantoesApp() {
                   bg="#E2F2E7"
                 />
                 <SummaryChip
+                  hideValues={hideValues}
                   icon={<Search size={14} />}
                   label="total"
                   value={searchResults.reduce((s, r) => s + (Number(r.value) || 0), 0)}
@@ -2754,6 +2784,7 @@ export default function PlantoesApp() {
 
         <div style={styles.summaryBar}>
           <SummaryChip
+                  hideValues={hideValues}
             icon={<Stethoscope size={14} />}
             label="plantões"
             count={monthTotals.plantaoCount}
@@ -2762,6 +2793,7 @@ export default function PlantoesApp() {
             bg="#E4F0EF"
           />
           <SummaryChip
+                  hideValues={hideValues}
             icon={<Truck size={14} />}
             label="remoções"
             count={monthTotals.remocaoCount}
@@ -2770,6 +2802,7 @@ export default function PlantoesApp() {
             bg="#F5E6DC"
           />
           <SummaryChip
+                  hideValues={hideValues}
             icon={<Presentation size={14} />}
             label="eventos"
             count={monthTotals.eventoCount}
@@ -2779,12 +2812,13 @@ export default function PlantoesApp() {
           />
           <div style={styles.totalChip}>
             <div style={styles.totalLabel}>total do mês</div>
-            <div style={styles.totalValue}>{currency(monthTotals.total)}</div>
+            <div style={styles.totalValue}>{fmtValue(monthTotals.total)}</div>
           </div>
         </div>
 
         <div style={styles.financeRow}>
           <SummaryChip
+                  hideValues={hideValues}
             icon={<CheckCircle2 size={14} />}
             label="recebido"
             value={monthTotals.paidSum}
@@ -2792,6 +2826,7 @@ export default function PlantoesApp() {
             bg="#E2F2E7"
           />
           <SummaryChip
+                  hideValues={hideValues}
             icon={<Circle size={14} />}
             label="a receber"
             value={monthTotals.pendingSum}
@@ -2919,7 +2954,7 @@ export default function PlantoesApp() {
                         ) : (
                           <Circle size={10} style={{ flexShrink: 0, opacity: 0.5 }} />
                         )}
-                        <span style={styles.chipValue}>{currency(e.value)}</span>
+                        <span style={styles.chipValue}>{fmtValue(e.value)}</span>
                       </button>
                       );
                     })}
@@ -3023,7 +3058,7 @@ export default function PlantoesApp() {
                         ) : (
                           <Circle size={10} style={{ flexShrink: 0, opacity: 0.5 }} />
                         )}
-                        <span style={styles.chipValue}>{currency(e.value)}</span>
+                        <span style={styles.chipValue}>{fmtValue(e.value)}</span>
                       </button>
                       );
                     })}
@@ -3085,7 +3120,7 @@ export default function PlantoesApp() {
                       </span>
                     </span>
                     <span style={styles.dayPanelItemRight}>
-                      <span style={styles.dayPanelItemValue}>{currency(e.value)}</span>
+                      <span style={styles.dayPanelItemValue}>{fmtValue(e.value)}</span>
                       <span
                         style={{
                           ...styles.dayPanelBadge,
@@ -3121,7 +3156,7 @@ export default function PlantoesApp() {
                           <span style={styles.weekCompareLabel}>
                             semana {i + 1} <span style={styles.weekCompareDates}>({w.label})</span>
                           </span>
-                          <span style={styles.weekCompareValue}>{currency(w.total)}</span>
+                          <span style={styles.weekCompareValue}>{fmtValue(w.total)}</span>
                         </div>
                         <div style={styles.weekCompareBarTrack}>
                           <div
@@ -3194,7 +3229,7 @@ export default function PlantoesApp() {
                                   </span>
                                 </span>
                                 <span style={styles.dayPanelItemRight}>
-                                  <span style={styles.dayPanelItemValue}>{currency(e.value)}</span>
+                                  <span style={styles.dayPanelItemValue}>{fmtValue(e.value)}</span>
                                   <span
                                     style={{
                                       ...styles.dayPanelBadge,
@@ -3811,7 +3846,7 @@ export default function PlantoesApp() {
   );
 }
 
-function SummaryChip({ icon, label, count, value, color, bg }) {
+function SummaryChip({ icon, label, count, value, color, bg, hideValues }) {
   return (
     <div style={{ ...styles.summaryChip, background: bg, color }}>
       <div style={styles.summaryChipIconRow}>
@@ -3821,7 +3856,7 @@ function SummaryChip({ icon, label, count, value, color, bg }) {
           <span style={styles.summaryChipCount}>{count}</span>
         )}
       </div>
-      <div style={styles.summaryChipValue}>{currency(value)}</div>
+      <div style={styles.summaryChipValue}>{hideValues ? "R$ ****" : currency(value)}</div>
     </div>
   );
 }
@@ -4809,6 +4844,18 @@ const styles = {
     borderRadius: 8,
     padding: "6px 10px",
     fontSize: 12,
+    cursor: "pointer",
+    color: "#5B6B75",
+  },
+  hideValuesBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 30,
+    height: 30,
+    border: "1px solid #E0DDD3",
+    background: "#fff",
+    borderRadius: 8,
     cursor: "pointer",
     color: "#5B6B75",
   },
