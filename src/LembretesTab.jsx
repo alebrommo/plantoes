@@ -24,6 +24,7 @@ export default function LembretesTab({
   onAdd,
   onToggle,
   onDelete,
+  onChangeData,
   onAddSubitem,
   onToggleSubitem,
   onDeleteSubitem,
@@ -33,6 +34,7 @@ export default function LembretesTab({
   const [newTexto, setNewTexto] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const [subitemDraft, setSubitemDraft] = useState("");
+  const [editingDateId, setEditingDateId] = useState(null);
 
   const items = Object.entries(lembretes)
     .flatMap(([dayKey, list]) => list.map((l) => ({ ...l, dayKey })))
@@ -92,15 +94,33 @@ export default function LembretesTab({
             return (
               <div key={l.id}>
                 <div style={styles.lembretesRow}>
-                  <span
-                    style={{
-                      ...styles.lembretesRowDate,
-                      ...(overdue ? styles.lembretesRowDateOverdue : {}),
-                    }}
-                  >
-                    <span>{weekday}</span>
-                    <span>{dayMonth}</span>
-                  </span>
+                  {editingDateId === l.id ? (
+                    <input
+                      type="date"
+                      autoFocus
+                      style={styles.lembretesRowDateInput}
+                      defaultValue={l.dayKey}
+                      onChange={(e) => {
+                        onChangeData(l.dayKey, l.id, e.target.value);
+                        setEditingDateId(null);
+                      }}
+                      onBlur={() => setEditingDateId(null)}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      style={{
+                        ...styles.lembretesRowDate,
+                        ...(overdue ? styles.lembretesRowDateOverdue : {}),
+                      }}
+                      onClick={() => setEditingDateId(l.id)}
+                      title="Mudar a data"
+                    >
+                      <span>{weekday}</span>
+                      <span>{dayMonth}</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn-icon"

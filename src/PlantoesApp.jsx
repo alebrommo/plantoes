@@ -1320,6 +1320,33 @@ export default function PlantoesApp() {
     [lembretes, showToast]
   );
 
+  const changeLembreteData = useCallback(
+    async (oldDayKey, id, newDayKey) => {
+      if (!newDayKey || newDayKey === oldDayKey) return;
+      const item = (lembretes[oldDayKey] || []).find((l) => l.id === id);
+      if (!item) return;
+      setLembretes((prev) => {
+        const next = { ...prev };
+        next[oldDayKey] = (next[oldDayKey] || []).filter((l) => l.id !== id);
+        if (next[oldDayKey].length === 0) delete next[oldDayKey];
+        next[newDayKey] = [...(next[newDayKey] || []), item];
+        return next;
+      });
+      const { error } = await supabase.from(LEMBRETES_TABLE).update({ data: newDayKey }).eq("id", id);
+      if (error) {
+        setLembretes((prev) => {
+          const next = { ...prev };
+          next[newDayKey] = (next[newDayKey] || []).filter((l) => l.id !== id);
+          if (next[newDayKey].length === 0) delete next[newDayKey];
+          next[oldDayKey] = [...(next[oldDayKey] || []), item];
+          return next;
+        });
+        showToast("Não foi possível alterar a data do lembrete", "error");
+      }
+    },
+    [lembretes, showToast]
+  );
+
   const lembretesPendentesCount = useMemo(
     () => Object.values(lembretes).reduce((sum, list) => sum + list.filter((l) => !l.feito).length, 0),
     [lembretes]
@@ -2472,6 +2499,7 @@ export default function PlantoesApp() {
             onAdd={addLembrete}
             onToggle={toggleLembreteFeito}
             onDelete={deleteLembrete}
+            onChangeData={changeLembreteData}
             onAddSubitem={addSubitem}
             onToggleSubitem={toggleSubitemFeito}
             onDeleteSubitem={deleteSubitem}
@@ -5410,15 +5438,28 @@ export const styles = {
     fontWeight: 700,
     color: "#5C3A88",
     background: "#EEE4F6",
+    border: "none",
     borderRadius: 7,
     padding: "5px 8px",
     minWidth: 54,
     textAlign: "center",
     flexShrink: 0,
+    cursor: "pointer",
   },
   lembretesRowDateOverdue: {
     color: "#942E22",
     background: "#F8E2DE",
+  },
+  lembretesRowDateInput: {
+    border: "1px solid #5C3A88",
+    borderRadius: 7,
+    padding: "5px 6px",
+    fontSize: 11,
+    fontFamily: "'Inter', sans-serif",
+    color: "#1C2B39",
+    background: "#fff",
+    minWidth: 128,
+    flexShrink: 0,
   },
   lembretesRowText: {
     flex: 1,
