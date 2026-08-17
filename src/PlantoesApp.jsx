@@ -868,6 +868,7 @@ export default function PlantoesApp() {
   }, [hideValues]);
 
   const fmtValue = (n) => (hideValues ? "R$ ****" : currency(n));
+  const [expandedSummaryKey, setExpandedSummaryKey] = useState(null); // "plantao" | "remocao" | "evento" | "pago" | "pendente" | null
   const [draggedEntry, setDraggedEntry] = useState(null); // { dayKey, id }
   const [dragOverDay, setDragOverDay] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1197,6 +1198,7 @@ export default function PlantoesApp() {
       eventoCount = 0,
       paidSum = 0,
       pendingSum = 0;
+    const items = [];
     Object.entries(entries).forEach(([key, list]) => {
       if (!key.startsWith(prefix)) return;
       list.forEach((e) => {
@@ -1213,6 +1215,7 @@ export default function PlantoesApp() {
         }
         if (e.pago) paidSum += v;
         else pendingSum += v;
+        items.push({ dayKey: key, ...e });
       });
     });
     return {
@@ -1225,6 +1228,7 @@ export default function PlantoesApp() {
       paidSum,
       pendingSum,
       total: plantaoSum + remocaoSum + eventoSum,
+      items: items.sort((a, b) => a.dayKey.localeCompare(b.dayKey)),
     };
   }, [entries, cursor]);
 
@@ -2791,6 +2795,8 @@ export default function PlantoesApp() {
             value={monthTotals.plantaoSum}
             color="#2D6E6E"
             bg="#E4F0EF"
+            active={expandedSummaryKey === "plantao"}
+            onClick={() => setExpandedSummaryKey((k) => (k === "plantao" ? null : "plantao"))}
           />
           <SummaryChip
                   hideValues={hideValues}
@@ -2800,6 +2806,8 @@ export default function PlantoesApp() {
             value={monthTotals.remocaoSum}
             color="#B5541F"
             bg="#F5E6DC"
+            active={expandedSummaryKey === "remocao"}
+            onClick={() => setExpandedSummaryKey((k) => (k === "remocao" ? null : "remocao"))}
           />
           <SummaryChip
                   hideValues={hideValues}
@@ -2809,6 +2817,8 @@ export default function PlantoesApp() {
             value={monthTotals.eventoSum}
             color="#1F4278"
             bg="#E3EAF6"
+            active={expandedSummaryKey === "evento"}
+            onClick={() => setExpandedSummaryKey((k) => (k === "evento" ? null : "evento"))}
           />
           <div style={styles.totalChip}>
             <div style={styles.totalLabel}>total do mês</div>
@@ -2824,6 +2834,8 @@ export default function PlantoesApp() {
             value={monthTotals.paidSum}
             color="#206B3C"
             bg="#E2F2E7"
+            active={expandedSummaryKey === "pago"}
+            onClick={() => setExpandedSummaryKey((k) => (k === "pago" ? null : "pago"))}
           />
           <SummaryChip
                   hideValues={hideValues}
@@ -2832,8 +2844,74 @@ export default function PlantoesApp() {
             value={monthTotals.pendingSum}
             color="#8C6D1B"
             bg="#F6EFDD"
+            active={expandedSummaryKey === "pendente"}
+            onClick={() => setExpandedSummaryKey((k) => (k === "pendente" ? null : "pendente"))}
           />
         </div>
+
+        {expandedSummaryKey && (() => {
+          const filtered = monthTotals.items.filter((e) => {
+            if (expandedSummaryKey === "pago") return !!e.pago;
+            if (expandedSummaryKey === "pendente") return !e.pago;
+            return e.type === expandedSummaryKey;
+          });
+          const summaryLabel = {
+            plantao: "Plantões",
+            remocao: "Remoções",
+            evento: "Eventos",
+            pago: "Recebido",
+            pendente: "A receber",
+          }[expandedSummaryKey];
+          return (
+            <div style={styles.summaryExpandWrap}>
+              <p style={styles.statsSectionTitle}>{summaryLabel} do mês</p>
+              {filtered.length === 0 ? (
+                <div style={styles.dayPanelEmpty}>Nenhum registro nesse grupo.</div>
+              ) : (
+                <div style={styles.dayPanelList}>
+                  {filtered.map((e) => (
+                    <button
+                      key={e.id}
+                      type="button"
+                      className="btn-lift"
+                      style={styles.dayPanelItem}
+                      onClick={() => openEditModal(e.dayKey, e)}
+                    >
+                      <span style={styles.dayPanelItemIcon}>
+                        {e.type === "plantao" ? (
+                          <Stethoscope size={15} />
+                        ) : e.type === "evento" ? (
+                          <Presentation size={15} />
+                        ) : (
+                          <Truck size={15} />
+                        )}
+                      </span>
+                      <span style={styles.dayPanelItemBody}>
+                        <span style={styles.dayPanelItemTitle}>
+                          {e.type === "remocao"
+                            ? e.empresa || "remoção"
+                            : e.local || (e.type === "evento" ? "evento" : "plantão")}
+                        </span>
+                        <span style={styles.dayPanelItemSub}>{formatShortWithWeekday(e.dayKey)}</span>
+                      </span>
+                      <span style={styles.dayPanelItemRight}>
+                        <span style={styles.dayPanelItemValue}>{fmtValue(e.value)}</span>
+                        <span
+                          style={{
+                            ...styles.dayPanelBadge,
+                            ...(e.pago ? styles.dayPanelBadgePago : styles.dayPanelBadgePendente),
+                          }}
+                        >
+                          {e.pago ? "pago" : "a receber"}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
         </>
         )}
       </header>
@@ -3846,9 +3924,22 @@ export default function PlantoesApp() {
   );
 }
 
-function SummaryChip({ icon, label, count, value, color, bg, hideValues }) {
+function SummaryChip({ icon, label, count, value, color, bg, hideValues, onClick, active }) {
+  const clickable = !!onClick;
   return (
-    <div style={{ ...styles.summaryChip, background: bg, color }}>
+    <div
+      style={{
+        ...styles.summaryChip,
+        background: bg,
+        color,
+        ...(clickable ? styles.summaryChipClickable : {}),
+        ...(active ? styles.summaryChipActive : {}),
+      }}
+      className={clickable ? "btn-lift" : undefined}
+      onClick={onClick}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+    >
       <div style={styles.summaryChipIconRow}>
         {icon}
         <span style={styles.summaryChipLabel}>{label}</span>
@@ -4704,10 +4795,24 @@ const styles = {
     flexWrap: "wrap",
     marginTop: 8,
   },
+  summaryExpandWrap: {
+    marginTop: 10,
+    background: "#fff",
+    border: "1px solid #E0DDD3",
+    borderRadius: 10,
+    boxShadow: "0 4px 14px rgba(28,43,57,0.06)",
+    padding: 12,
+  },
   summaryChip: {
     borderRadius: 10,
     padding: "8px 12px",
     minWidth: 130,
+  },
+  summaryChipClickable: {
+    cursor: "pointer",
+  },
+  summaryChipActive: {
+    boxShadow: "0 0 0 2px currentColor inset",
   },
   summaryChipIconRow: {
     display: "flex",
