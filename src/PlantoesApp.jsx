@@ -3361,33 +3361,69 @@ export default function PlantoesApp() {
                 </p>
                 <div style={styles.dayPanelList}>
                   {lembretes[viewDay].map((l) => (
-                    <div key={l.id} style={styles.lembreteItem}>
-                      <button
-                        type="button"
-                        className="btn-icon"
-                        style={styles.lembreteCheckbox}
-                        onClick={() => toggleLembreteFeito(viewDay, l.id)}
-                        aria-label={l.feito ? "Marcar como pendente" : "Marcar como feito"}
-                      >
-                        {l.feito ? <CheckCircle2 size={16} color="#5C3A88" /> : <Circle size={16} color="#8A8578" />}
-                      </button>
-                      <span
-                        style={{
-                          ...styles.lembreteItemText,
-                          ...(l.feito ? styles.lembreteItemTextDone : {}),
-                        }}
-                      >
-                        {l.texto}
-                      </span>
-                      <button
-                        type="button"
-                        className="btn-icon"
-                        style={styles.lembreteDelBtn}
-                        onClick={() => deleteLembrete(viewDay, l.id)}
-                        aria-label="Excluir lembrete"
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                    <div key={l.id}>
+                      <div style={styles.lembreteItem}>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          style={styles.lembreteCheckbox}
+                          onClick={() => toggleLembreteFeito(viewDay, l.id)}
+                          aria-label={l.feito ? "Marcar como pendente" : "Marcar como feito"}
+                        >
+                          {l.feito ? <CheckCircle2 size={16} color="#5C3A88" /> : <Circle size={16} color="#8A8578" />}
+                        </button>
+                        <span
+                          style={{
+                            ...styles.lembreteItemText,
+                            ...(l.feito ? styles.lembreteItemTextDone : {}),
+                          }}
+                        >
+                          {l.texto}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          style={styles.lembreteDelBtn}
+                          onClick={() => deleteLembrete(viewDay, l.id)}
+                          aria-label="Excluir lembrete"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                      {(l.subitens || []).length > 0 && (
+                        <div style={styles.lembretesSubitensWrap}>
+                          {l.subitens.map((s) => (
+                            <div key={s.id} style={styles.lembretesSubitemRow}>
+                              <button
+                                type="button"
+                                className="btn-icon"
+                                style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                                onClick={() => toggleSubitemFeito(viewDay, l.id, s.id)}
+                                aria-label={s.feito ? "Marcar subtópico como pendente" : "Marcar subtópico como feito"}
+                              >
+                                {s.feito ? <CheckCircle2 size={14} color="#5C3A88" /> : <Circle size={14} color="#8A8578" />}
+                              </button>
+                              <span
+                                style={{
+                                  ...styles.lembretesSubitemText,
+                                  ...(s.feito ? styles.lembretesSubitemTextDone : {}),
+                                }}
+                              >
+                                {s.texto}
+                              </span>
+                              <button
+                                type="button"
+                                className="btn-icon"
+                                style={styles.lembretesSubitemDelBtn}
+                                onClick={() => deleteSubitem(viewDay, l.id, s.id)}
+                                aria-label="Excluir subtópico"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
