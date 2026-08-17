@@ -33,6 +33,7 @@ import {
   Eye,
   EyeOff,
   Bell,
+  ChevronDown,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 import LembretesTab from "./LembretesTab";
@@ -879,6 +880,7 @@ export default function PlantoesApp() {
   const [calendarView, setCalendarView] = useState("mes"); // "mes" | "semana" | "dia"
   const [expandedWeekIdx, setExpandedWeekIdx] = useState(null); // qual semana está expandida na comparação por semana
   const [weekFilterQuery, setWeekFilterQuery] = useState("");
+  const [expandedLembreteId, setExpandedLembreteId] = useState(null); // lembrete com subtópicos abertos no painel do dia
   const [hideValues, setHideValues] = useState(() => {
     try {
       return localStorage.getItem("plantoes-hide-values") === "1";
@@ -3380,6 +3382,28 @@ export default function PlantoesApp() {
                         >
                           {l.texto}
                         </span>
+                        {(l.subitens || []).length > 0 && (
+                          <>
+                            <span style={styles.lembretesProgressBadge}>
+                              {l.subitens.filter((s) => s.feito).length}/{l.subitens.length}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn-icon"
+                              style={styles.lembretesExpandBtn}
+                              onClick={() =>
+                                setExpandedLembreteId((prev) => (prev === l.id ? null : l.id))
+                              }
+                              aria-label={expandedLembreteId === l.id ? "Ocultar subtópicos" : "Ver subtópicos"}
+                            >
+                              {expandedLembreteId === l.id ? (
+                                <ChevronDown size={16} />
+                              ) : (
+                                <ChevronRight size={16} />
+                              )}
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
                           className="btn-icon"
@@ -3390,7 +3414,7 @@ export default function PlantoesApp() {
                           <Trash2 size={13} />
                         </button>
                       </div>
-                      {(l.subitens || []).length > 0 && (
+                      {expandedLembreteId === l.id && (l.subitens || []).length > 0 && (
                         <div style={styles.lembretesSubitensWrap}>
                           {l.subitens.map((s) => (
                             <div key={s.id} style={styles.lembretesSubitemRow}>
