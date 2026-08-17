@@ -32,14 +32,18 @@ import {
   List,
   Eye,
   EyeOff,
+  Bell,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
+import LembretesTab from "./LembretesTab";
 
 const StatsTab = lazy(() => import("./StatsTab"));
 
 const FONT_IMPORT_ID = "plantoes-fonts";
 const TABLE = "entries";
+const LEMBRETES_TABLE = "lembretes";
 const CACHE_KEY = "plantoes-cache";
+const LEMBRETES_CACHE_KEY = "plantoes-lembretes-cache";
 const QUEUE_KEY = "plantoes-offline-queue";
 
 // Cópia local dos registros, usada para abrir o app sem internet.
@@ -59,6 +63,25 @@ function saveCache(uid, entries) {
   if (!uid) return;
   try {
     localStorage.setItem(`${CACHE_KEY}-${uid}`, JSON.stringify(entries));
+  } catch {
+    // localStorage indisponível/cheio — cache é best-effort, ignora
+  }
+}
+
+function loadLembretesCache(uid) {
+  if (!uid) return {};
+  try {
+    const raw = localStorage.getItem(`${LEMBRETES_CACHE_KEY}-${uid}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLembretesCache(uid, lembretes) {
+  if (!uid) return;
+  try {
+    localStorage.setItem(`${LEMBRETES_CACHE_KEY}-${uid}`, JSON.stringify(lembretes));
   } catch {
     // localStorage indisponível/cheio — cache é best-effort, ignora
   }
@@ -169,6 +192,18 @@ function rowsToEntries(rows) {
   for (const row of rows) {
     const entry = rowToEntry(row);
     (grouped[row.day_key] ||= []).push(entry);
+  }
+  return grouped;
+}
+
+function rowToLembrete(row) {
+  return { id: row.id, texto: row.texto || "", feito: !!row.feito };
+}
+
+function lembretesToDict(rows) {
+  const grouped = {};
+  for (const row of rows) {
+    (grouped[row.data] ||= []).push(rowToLembrete(row));
   }
   return grouped;
 }
@@ -1125,6 +1160,114 @@ export default function PlantoesApp() {
       supabase.removeChannel(channel);
     };
   }, [showToast, userId]);
+
+  // Lembretes: registros simples (data + texto + feito), numa tabela própria,
+  // carregados e sincronizados em tempo real do mesmo jeito que os plantões.
+  const [lembretes, setLembretes] = useState({});
+
+  useEffect(() => {
+    if (!supabaseConfigured || !userId) {
+      setLembretes({});
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        if (!navigator.onLine) throw new Error("offline");
+        const { data, error } = await supabase.from(LEMBRETES_TABLE).select("*");
+        if (cancelled) return;
+        if (error) throw error;
+        const next = lembretesToDict(data);
+        setLembretes(next);
+        saveLembretesCache(userId, next);
+      } catch {
+        if (cancelled) return;
+        setLembretes(loadLembretesCache(userId));
+      }
+    })();
+
+    const removeFromAllDays = (obj, id) => {
+      for (const day of Object.keys(obj)) {
+        const filtered = obj[day].filter((l) => l.id !== id);
+        if (filtered.length) obj[day] = filtered;
+        else delete obj[day];
+      }
+    };
+
+    const channel = supabase
+      .channel("lembretes-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: LEMBRETES_TABLE },
+        (payload) => {
+          setLembretes((prev) => {
+            const next = { ...prev };
+            if (payload.eventType === "DELETE") {
+              removeFromAllDays(next, payload.old.id);
+            } else {
+              const row = payload.new;
+              removeFromAllDays(next, row.id);
+              next[row.data] = [...(next[row.data] || []), rowToLembrete(row)];
+            }
+            return next;
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  const addLembrete = useCallback(
+    async (dayKey, texto) => {
+      const trimmed = texto.trim();
+      if (!trimmed || !dayKey) return;
+      const id = crypto.randomUUID();
+      setLembretes((prev) => ({ ...prev, [dayKey]: [...(prev[dayKey] || []), { id, texto: trimmed, feito: false }] }));
+      const { error } = await supabase
+        .from(LEMBRETES_TABLE)
+        .insert({ id, user_id: userId, data: dayKey, texto: trimmed, feito: false });
+      if (error) {
+        setLembretes((prev) => ({ ...prev, [dayKey]: (prev[dayKey] || []).filter((l) => l.id !== id) }));
+        showToast("Não foi possível salvar o lembrete", "error");
+      }
+    },
+    [userId, showToast]
+  );
+
+  const toggleLembreteFeito = useCallback(
+    async (dayKey, id) => {
+      const current = (lembretes[dayKey] || []).find((l) => l.id === id);
+      if (!current) return;
+      const nextFeito = !current.feito;
+      setLembretes((prev) => ({
+        ...prev,
+        [dayKey]: (prev[dayKey] || []).map((l) => (l.id === id ? { ...l, feito: nextFeito } : l)),
+      }));
+      const { error } = await supabase.from(LEMBRETES_TABLE).update({ feito: nextFeito }).eq("id", id);
+      if (error) showToast("Não foi possível atualizar o lembrete", "error");
+    },
+    [lembretes, showToast, userId]
+  );
+
+  const deleteLembrete = useCallback(
+    async (dayKey, id) => {
+      setLembretes((prev) => ({ ...prev, [dayKey]: (prev[dayKey] || []).filter((l) => l.id !== id) }));
+      const { error } = await supabase.from(LEMBRETES_TABLE).delete().eq("id", id);
+      if (error) showToast("Não foi possível excluir o lembrete", "error");
+    },
+    [showToast, userId]
+  );
+
+  const lembretesPendentesCount = useMemo(
+    () => Object.values(lembretes).reduce((sum, list) => sum + list.filter((l) => !l.feito).length, 0),
+    [lembretes]
+  );
 
   const daysGrid = useMemo(() => {
     const { year, month } = cursor;
@@ -2251,7 +2394,31 @@ export default function PlantoesApp() {
             <BarChart3 size={14} />
             estatísticas
           </button>
+          <button
+            onClick={() => setActiveTab("lembretes")}
+            className="pill-btn"
+            style={{
+              ...styles.tabBtn,
+              ...(activeTab === "lembretes" ? styles.tabBtnActive : {}),
+            }}
+          >
+            <Bell size={14} />
+            lembretes
+            {lembretesPendentesCount > 0 && (
+              <span style={styles.lembreteTabBadge}>{lembretesPendentesCount}</span>
+            )}
+          </button>
         </div>
+
+        {activeTab === "lembretes" && (
+          <LembretesTab
+            lembretes={lembretes}
+            onAdd={addLembrete}
+            onToggle={toggleLembreteFeito}
+            onDelete={deleteLembrete}
+            styles={styles}
+          />
+        )}
 
         {activeTab === "estatisticas" && (
           <Suspense
@@ -2876,6 +3043,30 @@ export default function PlantoesApp() {
                       </button>
                       );
                     })}
+                    {(lembretes[dayKey] || []).map((l) => (
+                      <button
+                        key={l.id}
+                        type="button"
+                        className="chip-lift"
+                        style={{
+                          ...styles.entryChip,
+                          ...styles.lembreteChip,
+                          ...(l.feito ? styles.lembreteChipDone : {}),
+                        }}
+                        onClick={() => toggleLembreteFeito(dayKey, l.id)}
+                        title={l.texto}
+                      >
+                        <Bell size={10} />
+                        <span
+                          style={{
+                            ...styles.chipText,
+                            ...(l.feito ? { textDecoration: "line-through" } : {}),
+                          }}
+                        >
+                          {l.texto}
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               );
@@ -2980,6 +3171,30 @@ export default function PlantoesApp() {
                       </button>
                       );
                     })}
+                    {(lembretes[dayKey] || []).map((l) => (
+                      <button
+                        key={l.id}
+                        type="button"
+                        className="chip-lift"
+                        style={{
+                          ...styles.entryChip,
+                          ...styles.lembreteChip,
+                          ...(l.feito ? styles.lembreteChipDone : {}),
+                        }}
+                        onClick={() => toggleLembreteFeito(dayKey, l.id)}
+                        title={l.texto}
+                      >
+                        <Bell size={10} />
+                        <span
+                          style={{
+                            ...styles.chipText,
+                            ...(l.feito ? { textDecoration: "line-through" } : {}),
+                          }}
+                        >
+                          {l.texto}
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               );
@@ -3050,6 +3265,45 @@ export default function PlantoesApp() {
                     </span>
                   </button>
                 ))}
+              </div>
+            )}
+            {viewDay && (lembretes[viewDay] || []).length > 0 && (
+              <div style={styles.dayPanelLembretesWrap}>
+                <p style={styles.dayPanelLembretesTitle}>
+                  <Bell size={12} /> lembretes
+                </p>
+                <div style={styles.dayPanelList}>
+                  {lembretes[viewDay].map((l) => (
+                    <div key={l.id} style={styles.lembreteItem}>
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        style={styles.lembreteCheckbox}
+                        onClick={() => toggleLembreteFeito(viewDay, l.id)}
+                        aria-label={l.feito ? "Marcar como pendente" : "Marcar como feito"}
+                      >
+                        {l.feito ? <CheckCircle2 size={16} color="#5C3A88" /> : <Circle size={16} color="#8A8578" />}
+                      </button>
+                      <span
+                        style={{
+                          ...styles.lembreteItemText,
+                          ...(l.feito ? styles.lembreteItemTextDone : {}),
+                        }}
+                      >
+                        {l.texto}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        style={styles.lembreteDelBtn}
+                        onClick={() => deleteLembrete(viewDay, l.id)}
+                        aria-label="Excluir lembrete"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -4321,6 +4575,20 @@ export const styles = {
     color: "#F7F5F0",
     fontWeight: 600,
   },
+  lembreteTabBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 16,
+    height: 16,
+    padding: "0 4px",
+    borderRadius: 999,
+    background: "#C0392B",
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: 700,
+    lineHeight: "16px",
+  },
   statsSectionTitle: {
     fontSize: 12.5,
     fontWeight: 700,
@@ -4961,6 +5229,147 @@ export const styles = {
   dayPanelBadgePendente: {
     color: "#8C6D1B",
     background: "#F6EFDD",
+  },
+  dayPanelLembretesWrap: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTop: "1px solid #E7E3D8",
+  },
+  dayPanelLembretesTitle: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 11.5,
+    fontWeight: 700,
+    color: "#5C3A88",
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
+    margin: "0 0 8px",
+  },
+  lembreteItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    border: "1px solid #E7E3D8",
+    background: "#FCFBF8",
+    borderRadius: 8,
+    padding: "6px 8px",
+  },
+  lembreteCheckbox: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  lembreteItemText: {
+    flex: 1,
+    fontSize: 12.5,
+    color: "#1C2B39",
+    overflowWrap: "anywhere",
+  },
+  lembreteItemTextDone: {
+    color: "#8A8578",
+    textDecoration: "line-through",
+  },
+  lembreteDelBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    color: "#B5541F",
+  },
+  lembreteChip: {
+    background: "#EEE4F6",
+    color: "#5C3A88",
+  },
+  lembreteChipDone: {
+    opacity: 0.55,
+  },
+  lembretesAddRow: {
+    display: "flex",
+    gap: 8,
+    flexWrap: "wrap",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  lembretesDateInput: {
+    border: "1px solid #E0DDD3",
+    borderRadius: 8,
+    padding: "9px 10px",
+    fontSize: 13.5,
+    fontFamily: "'Inter', sans-serif",
+    color: "#1C2B39",
+    background: "#fff",
+    width: 150,
+  },
+  lembretesTextInput: {
+    border: "1px solid #E0DDD3",
+    borderRadius: 8,
+    padding: "9px 10px",
+    fontSize: 13.5,
+    fontFamily: "'Inter', sans-serif",
+    color: "#1C2B39",
+    background: "#fff",
+    flex: 1,
+    minWidth: 180,
+  },
+  lembretesAddBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    fontSize: 12.5,
+    fontWeight: 600,
+    color: "#fff",
+    background: "#5C3A88",
+    border: "none",
+    borderRadius: 8,
+    padding: "9px 14px",
+    cursor: "pointer",
+    flexShrink: 0,
+  },
+  lembretesListWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+  },
+  lembretesRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    border: "1px solid #E0DDD3",
+    background: "#fff",
+    borderRadius: 10,
+    padding: "9px 12px",
+  },
+  lembretesRowDate: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "'IBM Plex Mono', monospace",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#5C3A88",
+    background: "#EEE4F6",
+    borderRadius: 7,
+    padding: "5px 8px",
+    minWidth: 54,
+    textAlign: "center",
+    flexShrink: 0,
+  },
+  lembretesRowDateOverdue: {
+    color: "#942E22",
+    background: "#F8E2DE",
+  },
+  lembretesRowText: {
+    flex: 1,
+    fontSize: 13.5,
+    color: "#1C2B39",
+    overflowWrap: "anywhere",
+  },
+  lembretesRowTextDone: {
+    color: "#8A8578",
+    textDecoration: "line-through",
   },
   weekCompareWrap: {
     marginTop: 14,
