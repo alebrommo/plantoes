@@ -1,18 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import * as XLSX from "xlsx";
-import {
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  Legend,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
+import React, { useState, useEffect, useMemo, useCallback, useRef, Suspense, lazy } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -48,6 +34,8 @@ import {
   EyeOff,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
+
+const StatsTab = lazy(() => import("./StatsTab"));
 
 const FONT_IMPORT_ID = "plantoes-fonts";
 const TABLE = "entries";
@@ -193,7 +181,7 @@ const DIAS_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 // Ordem de exibição do cabeçalho do calendário: semana começando na segunda-feira.
 const WEEK_HEADER_LABELS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"];
 
-const TYPE_CHART_COLORS = { plantao: "#2D6E6E", remocao: "#B5541F", evento: "#2A5DA8" };
+export const TYPE_CHART_COLORS = { plantao: "#2D6E6E", remocao: "#B5541F", evento: "#2A5DA8" };
 
 const PALETTE = [
   { id: "teal", label: "Teal", base: "#2D6E6E", bg: "#E4F0EF", text: "#215454" },
@@ -1598,13 +1586,14 @@ export default function PlantoesApp() {
     }
   };
 
-  const generateSearchExcel = () => {
+  const generateSearchExcel = async () => {
     if (!Object.values(exportCols).some(Boolean)) {
       showToast("Escolha ao menos uma coluna", "error");
       return;
     }
     setSearchExcelLoading(true);
     try {
+      const XLSX = await import("xlsx");
       const activeCols = EXPORT_COL_ORDER.filter((k) => exportCols[k]);
       const header = activeCols.map((k) => EXPORT_COL_LABEL[k]);
       const rows = searchResults.map((e) =>
@@ -1705,6 +1694,7 @@ export default function PlantoesApp() {
   const generateExcel = async (range) => {
     setExcelLoading(true);
     try {
+      const XLSX = await import("xlsx");
       const data = computePrintData(range);
       const header = ["Data", "Tipo", "Descrição", "Horário", "Status", "Valor (R$)"];
       const tipoLabel = { plantao: "Plantão", remocao: "Remoção", evento: "Evento" };
@@ -2264,174 +2254,24 @@ export default function PlantoesApp() {
         </div>
 
         {activeTab === "estatisticas" && (
-          <div style={styles.searchWrap}>
-            <div style={styles.summaryBar}>
-              <StatCard label="registros no total" value={String(statsGeral.count)} />
-              <StatCard label="valor total" value={fmtValue(statsGeral.total)} />
-              <StatCard
-                label="recebido"
-                value={fmtValue(statsGeral.recebido)}
-                color="#206B3C"
-                bg="#E2F2E7"
-              />
-              <StatCard
-                label="a receber"
-                value={fmtValue(statsGeral.aReceber)}
-                color="#8C6D1B"
-                bg="#F6EFDD"
-              />
-            </div>
-
-            <p style={styles.statsSectionTitle}>Por tipo</p>
-            <div style={styles.searchDropdown}>
-              {statsPorTipo.some((t) => t.total > 0) && (
-                <div style={styles.chartWrap}>
-                  <ResponsiveContainer width="100%" height={130}>
-                    <PieChart>
-                      <Pie
-                        data={statsPorTipo.filter((t) => t.total > 0)}
-                        dataKey="total"
-                        nameKey="label"
-                        innerRadius={34}
-                        outerRadius={58}
-                        paddingAngle={2}
-                      >
-                        {statsPorTipo
-                          .filter((t) => t.total > 0)
-                          .map((t) => (
-                            <Cell key={t.id} fill={TYPE_CHART_COLORS[t.id]} />
-                          ))}
-                      </Pie>
-                      <Tooltip formatter={(v) => fmtValue(v)} />
-                      <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-              <div style={styles.searchScrollArea}>
-                <table style={styles.searchTable}>
-                  <thead>
-                    <tr>
-                      <th style={styles.searchTh}>Tipo</th>
-                      <th style={{ ...styles.searchTh, textAlign: "right" }}>Qtd.</th>
-                      <th style={{ ...styles.searchTh, textAlign: "right" }}>Total</th>
-                      <th style={{ ...styles.searchTh, textAlign: "right" }}>Recebido</th>
-                      <th style={{ ...styles.searchTh, textAlign: "right" }}>A receber</th>
-                      <th style={{ ...styles.searchTh, textAlign: "right" }}>Média</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {statsPorTipo.map((t) => (
-                      <tr key={t.id}>
-                        <td style={styles.searchTdName}>{t.label}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{t.count}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(t.total)}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(t.recebido)}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(t.aReceber)}</td>
-                        <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(t.media)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <Suspense
+            fallback={
+              <div style={styles.loadingBox}>
+                <Loader2 size={22} className="spin" />
+                <span>carregando estatísticas…</span>
               </div>
-            </div>
-
-            <p style={styles.statsSectionTitle}>Por empresa</p>
-            <div style={styles.searchDropdown}>
-              {statsPorEmpresaChart.length > 0 && (
-                <div style={styles.chartWrap}>
-                  <ResponsiveContainer width="100%" height={Math.min(180, Math.max(90, statsPorEmpresaChart.length * 26))}>
-                    <BarChart data={statsPorEmpresaChart} layout="vertical" margin={{ top: 2, left: 8, right: 12, bottom: 2 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                      <XAxis type="number" tickFormatter={(v) => fmtValue(v)} fontSize={10} height={20} />
-                      <YAxis type="category" dataKey="empresa" width={90} fontSize={10} />
-                      <Tooltip formatter={(v) => fmtValue(v)} />
-                      <Bar dataKey="total" name="Total" fill="#1C2B39" radius={[0, 3, 3, 0]} barSize={14} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-              {statsPorEmpresa.length === 0 ? (
-                <div style={styles.searchEmpty}>Nenhum registro com empresa ainda.</div>
-              ) : (
-                <div style={styles.searchScrollArea}>
-                  <table style={styles.searchTable}>
-                    <thead>
-                      <tr>
-                        <th style={styles.searchTh}>Empresa</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Qtd.</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Total</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Recebido</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>A receber</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {statsPorEmpresa.map((e) => (
-                        <tr key={e.empresa}>
-                          <td style={styles.searchTdName}>{e.empresa}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{e.count}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(e.total)}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(e.recebido)}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(e.aReceber)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            <p style={styles.statsSectionTitle}>Por mês</p>
-            <div style={styles.searchDropdown}>
-              {statsPorMesChart.length > 0 && (
-                <div style={styles.chartWrap}>
-                  <ResponsiveContainer width="100%" height={150}>
-                    <BarChart data={statsPorMesChart} margin={{ top: 2, left: 4, right: 8, bottom: 2 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis dataKey="label" fontSize={10} />
-                      <YAxis tickFormatter={(v) => fmtValue(v)} fontSize={10} width={60} />
-                      <Tooltip formatter={(v) => fmtValue(v)} />
-                      <Legend iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="recebido" name="Recebido" stackId="v" fill="#2F8F52" barSize={16} />
-                      <Bar dataKey="aReceber" name="A receber" stackId="v" fill="#B8912B" radius={[3, 3, 0, 0]} barSize={16} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-              {statsPorMes.length === 0 ? (
-                <div style={styles.searchEmpty}>Nenhum registro ainda.</div>
-              ) : (
-                <div style={styles.searchScrollArea}>
-                  <table style={styles.searchTable}>
-                    <thead>
-                      <tr>
-                        <th style={styles.searchTh}>Mês</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Plantões</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Remoções</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Eventos</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Total</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>Recebido</th>
-                        <th style={{ ...styles.searchTh, textAlign: "right" }}>A receber</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {statsPorMes.map((m) => (
-                        <tr key={m.mesKey}>
-                          <td style={styles.searchTdName}>{m.label}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.plantoes}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.remocoes}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{m.eventos}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(m.total)}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(m.recebido)}</td>
-                          <td style={{ ...styles.searchTd, textAlign: "right" }}>{fmtValue(m.aReceber)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
+            }
+          >
+            <StatsTab
+              statsGeral={statsGeral}
+              statsPorTipo={statsPorTipo}
+              statsPorEmpresaChart={statsPorEmpresaChart}
+              statsPorEmpresa={statsPorEmpresa}
+              statsPorMesChart={statsPorMesChart}
+              statsPorMes={statsPorMes}
+              fmtValue={fmtValue}
+            />
+          </Suspense>
         )}
 
         {activeTab === "buscar" && (
@@ -3952,7 +3792,7 @@ function SummaryChip({ icon, label, count, value, color, bg, hideValues, onClick
   );
 }
 
-function StatCard({ label, value, color = "#1C2B39", bg = "#F1EFE9" }) {
+export function StatCard({ label, value, color = "#1C2B39", bg = "#F1EFE9" }) {
   return (
     <div style={{ ...styles.summaryChip, background: bg, color }}>
       <div style={styles.summaryChipIconRow}>
@@ -4368,7 +4208,7 @@ const globalCss = `
   }
 `;
 
-const styles = {
+export const styles = {
   presetRow: { display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" },
   searchWrap: { position: "relative", marginBottom: 12 },
   searchFiltersRow: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" },
