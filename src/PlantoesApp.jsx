@@ -196,8 +196,14 @@ function rowsToEntries(rows) {
   return grouped;
 }
 
+// Subtópicos de um lembrete: checklist própria, guardada como jsonb na mesma linha.
+function normalizeSubitens(subitens) {
+  if (!Array.isArray(subitens)) return [];
+  return subitens.map((s) => ({ id: s.id, texto: s.texto || "", feito: !!s.feito }));
+}
+
 function rowToLembrete(row) {
-  return { id: row.id, texto: row.texto || "", feito: !!row.feito };
+  return { id: row.id, texto: row.texto || "", feito: !!row.feito, subitens: normalizeSubitens(row.subitens) };
 }
 
 function lembretesToDict(rows) {
@@ -1228,10 +1234,13 @@ export default function PlantoesApp() {
       const trimmed = texto.trim();
       if (!trimmed || !dayKey) return;
       const id = crypto.randomUUID();
-      setLembretes((prev) => ({ ...prev, [dayKey]: [...(prev[dayKey] || []), { id, texto: trimmed, feito: false }] }));
+      setLembretes((prev) => ({
+        ...prev,
+        [dayKey]: [...(prev[dayKey] || []), { id, texto: trimmed, feito: false, subitens: [] }],
+      }));
       const { error } = await supabase
         .from(LEMBRETES_TABLE)
-        .insert({ id, user_id: userId, data: dayKey, texto: trimmed, feito: false });
+        .insert({ id, user_id: userId, data: dayKey, texto: trimmed, feito: false, subitens: [] });
       if (error) {
         setLembretes((prev) => ({ ...prev, [dayKey]: (prev[dayKey] || []).filter((l) => l.id !== id) }));
         showToast("Não foi possível salvar o lembrete", "error");
@@ -1262,6 +1271,53 @@ export default function PlantoesApp() {
       if (error) showToast("Não foi possível excluir o lembrete", "error");
     },
     [showToast, userId]
+  );
+
+  const addSubitem = useCallback(
+    async (dayKey, lembreteId, texto) => {
+      const trimmed = texto.trim();
+      if (!trimmed) return;
+      const parent = (lembretes[dayKey] || []).find((l) => l.id === lembreteId);
+      if (!parent) return;
+      const nextSubitens = [...parent.subitens, { id: crypto.randomUUID(), texto: trimmed, feito: false }];
+      setLembretes((prev) => ({
+        ...prev,
+        [dayKey]: (prev[dayKey] || []).map((l) => (l.id === lembreteId ? { ...l, subitens: nextSubitens } : l)),
+      }));
+      const { error } = await supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId);
+      if (error) showToast("Não foi possível salvar o subtópico", "error");
+    },
+    [lembretes, showToast]
+  );
+
+  const toggleSubitemFeito = useCallback(
+    async (dayKey, lembreteId, subitemId) => {
+      const parent = (lembretes[dayKey] || []).find((l) => l.id === lembreteId);
+      if (!parent) return;
+      const nextSubitens = parent.subitens.map((s) => (s.id === subitemId ? { ...s, feito: !s.feito } : s));
+      setLembretes((prev) => ({
+        ...prev,
+        [dayKey]: (prev[dayKey] || []).map((l) => (l.id === lembreteId ? { ...l, subitens: nextSubitens } : l)),
+      }));
+      const { error } = await supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId);
+      if (error) showToast("Não foi possível atualizar o subtópico", "error");
+    },
+    [lembretes, showToast]
+  );
+
+  const deleteSubitem = useCallback(
+    async (dayKey, lembreteId, subitemId) => {
+      const parent = (lembretes[dayKey] || []).find((l) => l.id === lembreteId);
+      if (!parent) return;
+      const nextSubitens = parent.subitens.filter((s) => s.id !== subitemId);
+      setLembretes((prev) => ({
+        ...prev,
+        [dayKey]: (prev[dayKey] || []).map((l) => (l.id === lembreteId ? { ...l, subitens: nextSubitens } : l)),
+      }));
+      const { error } = await supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId);
+      if (error) showToast("Não foi possível excluir o subtópico", "error");
+    },
+    [lembretes, showToast]
   );
 
   const lembretesPendentesCount = useMemo(
@@ -2416,6 +2472,9 @@ export default function PlantoesApp() {
             onAdd={addLembrete}
             onToggle={toggleLembreteFeito}
             onDelete={deleteLembrete}
+            onAddSubitem={addSubitem}
+            onToggleSubitem={toggleSubitemFeito}
+            onDeleteSubitem={deleteSubitem}
             styles={styles}
           />
         )}
@@ -5370,6 +5429,75 @@ export const styles = {
   lembretesRowTextDone: {
     color: "#8A8578",
     textDecoration: "line-through",
+  },
+  lembretesExpandBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    color: "#8A8578",
+  },
+  lembretesProgressBadge: {
+    fontSize: 10.5,
+    fontWeight: 700,
+    color: "#5C3A88",
+    background: "#EEE4F6",
+    borderRadius: 6,
+    padding: "2px 6px",
+    flexShrink: 0,
+  },
+  lembretesSubitensWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+    margin: "2px 0 4px 32px",
+    paddingLeft: 12,
+    borderLeft: "2px solid #EEE4F6",
+  },
+  lembretesSubitemRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 12.5,
+  },
+  lembretesSubitemText: {
+    flex: 1,
+    color: "#1C2B39",
+    overflowWrap: "anywhere",
+  },
+  lembretesSubitemTextDone: {
+    color: "#8A8578",
+    textDecoration: "line-through",
+  },
+  lembretesSubitemDelBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    color: "#B5541F",
+  },
+  lembretesSubitemAddRow: {
+    display: "flex",
+    gap: 6,
+    alignItems: "center",
+    marginTop: 2,
+  },
+  lembretesSubitemInput: {
+    flex: 1,
+    border: "1px solid #E0DDD3",
+    borderRadius: 6,
+    padding: "5px 8px",
+    fontSize: 12,
+    fontFamily: "'Inter', sans-serif",
+    color: "#1C2B39",
+    background: "#fff",
+  },
+  lembretesSubitemAddBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    color: "#5C3A88",
   },
   weekCompareWrap: {
     marginTop: 14,

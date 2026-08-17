@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bell, Plus, Trash2, CheckCircle2, Circle } from "lucide-react";
+import { Bell, Plus, Trash2, CheckCircle2, Circle, ChevronDown, ChevronRight } from "lucide-react";
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -17,10 +17,22 @@ function formatDayShort(dayKey) {
   return { weekday, dayMonth: `${pad(d)}/${pad(m)}` };
 }
 
-// Aba "lembretes": lista simples de avisos com data, cada um marcável como feito.
-export default function LembretesTab({ lembretes, onAdd, onToggle, onDelete, styles }) {
+// Aba "lembretes": lista simples de avisos com data, cada um marcável como feito
+// e com uma checklist própria de subtópicos.
+export default function LembretesTab({
+  lembretes,
+  onAdd,
+  onToggle,
+  onDelete,
+  onAddSubitem,
+  onToggleSubitem,
+  onDeleteSubitem,
+  styles,
+}) {
   const [newDate, setNewDate] = useState(todayKey());
   const [newTexto, setNewTexto] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+  const [subitemDraft, setSubitemDraft] = useState("");
 
   const items = Object.entries(lembretes)
     .flatMap(([dayKey, list]) => list.map((l) => ({ ...l, dayKey })))
@@ -32,6 +44,12 @@ export default function LembretesTab({ lembretes, onAdd, onToggle, onDelete, sty
     if (!newTexto.trim() || !newDate) return;
     onAdd(newDate, newTexto);
     setNewTexto("");
+  }
+
+  function handleAddSubitem(l) {
+    if (!subitemDraft.trim()) return;
+    onAddSubitem(l.dayKey, l.id, subitemDraft);
+    setSubitemDraft("");
   }
 
   return (
@@ -68,43 +86,118 @@ export default function LembretesTab({ lembretes, onAdd, onToggle, onDelete, sty
           {items.map((l) => {
             const { weekday, dayMonth } = formatDayShort(l.dayKey);
             const overdue = !l.feito && l.dayKey < hoje;
+            const isExpanded = expandedId === l.id;
+            const subitens = l.subitens || [];
+            const feitosCount = subitens.filter((s) => s.feito).length;
             return (
-              <div key={l.id} style={styles.lembretesRow}>
-                <span
-                  style={{
-                    ...styles.lembretesRowDate,
-                    ...(overdue ? styles.lembretesRowDateOverdue : {}),
-                  }}
-                >
-                  <span>{weekday}</span>
-                  <span>{dayMonth}</span>
-                </span>
-                <button
-                  type="button"
-                  className="btn-icon"
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
-                  onClick={() => onToggle(l.dayKey, l.id)}
-                  aria-label={l.feito ? "Marcar como pendente" : "Marcar como feito"}
-                >
-                  {l.feito ? <CheckCircle2 size={18} color="#5C3A88" /> : <Circle size={18} color="#8A8578" />}
-                </button>
-                <span
-                  style={{
-                    ...styles.lembretesRowText,
-                    ...(l.feito ? styles.lembretesRowTextDone : {}),
-                  }}
-                >
-                  {l.texto}
-                </span>
-                <button
-                  type="button"
-                  className="btn-icon"
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#B5541F" }}
-                  onClick={() => onDelete(l.dayKey, l.id)}
-                  aria-label="Excluir lembrete"
-                >
-                  <Trash2 size={14} />
-                </button>
+              <div key={l.id}>
+                <div style={styles.lembretesRow}>
+                  <span
+                    style={{
+                      ...styles.lembretesRowDate,
+                      ...(overdue ? styles.lembretesRowDateOverdue : {}),
+                    }}
+                  >
+                    <span>{weekday}</span>
+                    <span>{dayMonth}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                    onClick={() => onToggle(l.dayKey, l.id)}
+                    aria-label={l.feito ? "Marcar como pendente" : "Marcar como feito"}
+                  >
+                    {l.feito ? <CheckCircle2 size={18} color="#5C3A88" /> : <Circle size={18} color="#8A8578" />}
+                  </button>
+                  <span
+                    style={{
+                      ...styles.lembretesRowText,
+                      ...(l.feito ? styles.lembretesRowTextDone : {}),
+                    }}
+                  >
+                    {l.texto}
+                  </span>
+                  {subitens.length > 0 && (
+                    <span style={styles.lembretesProgressBadge}>
+                      {feitosCount}/{subitens.length}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    style={styles.lembretesExpandBtn}
+                    onClick={() => setExpandedId((prev) => (prev === l.id ? null : l.id))}
+                    aria-label={isExpanded ? "Ocultar subtópicos" : "Ver subtópicos"}
+                  >
+                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-icon"
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#B5541F" }}
+                    onClick={() => onDelete(l.dayKey, l.id)}
+                    aria-label="Excluir lembrete"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+
+                {isExpanded && (
+                  <div style={styles.lembretesSubitensWrap}>
+                    {subitens.map((s) => (
+                      <div key={s.id} style={styles.lembretesSubitemRow}>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          style={{ display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                          onClick={() => onToggleSubitem(l.dayKey, l.id, s.id)}
+                          aria-label={s.feito ? "Marcar subtópico como pendente" : "Marcar subtópico como feito"}
+                        >
+                          {s.feito ? <CheckCircle2 size={15} color="#5C3A88" /> : <Circle size={15} color="#8A8578" />}
+                        </button>
+                        <span
+                          style={{
+                            ...styles.lembretesSubitemText,
+                            ...(s.feito ? styles.lembretesSubitemTextDone : {}),
+                          }}
+                        >
+                          {s.texto}
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-icon"
+                          style={styles.lembretesSubitemDelBtn}
+                          onClick={() => onDeleteSubitem(l.dayKey, l.id, s.id)}
+                          aria-label="Excluir subtópico"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                    <div style={styles.lembretesSubitemAddRow}>
+                      <input
+                        type="text"
+                        style={styles.lembretesSubitemInput}
+                        placeholder="Novo subtópico…"
+                        value={subitemDraft}
+                        onChange={(e) => setSubitemDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleAddSubitem(l);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="btn-icon"
+                        style={styles.lembretesSubitemAddBtn}
+                        onClick={() => handleAddSubitem(l)}
+                        aria-label="Adicionar subtópico"
+                      >
+                        <Plus size={15} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
