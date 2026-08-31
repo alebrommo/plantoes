@@ -207,6 +207,17 @@ function rowToLembrete(row) {
   return { id: row.id, texto: row.texto || "", feito: !!row.feito, subitens: normalizeSubitens(row.subitens) };
 }
 
+function lembreteToRow(dayKey, lembrete, userId) {
+  return {
+    id: lembrete.id,
+    user_id: userId,
+    data: dayKey,
+    texto: lembrete.texto,
+    feito: !!lembrete.feito,
+    subitens: lembrete.subitens ?? [],
+  };
+}
+
 function lembretesToDict(rows) {
   const grouped = {};
   for (const row of rows) {
@@ -1040,11 +1051,12 @@ export default function PlantoesApp() {
     if (queue.length === 0) return;
     while (queue.length > 0) {
       const op = queue[0];
+      const table = op.table || TABLE;
       try {
         const { error } =
           op.kind === "delete"
-            ? await supabase.from(TABLE).delete().eq("id", op.row.id)
-            : await supabase.from(TABLE).upsert(op.row);
+            ? await supabase.from(table).delete().eq("id", op.row.id)
+            : await supabase.from(table).upsert(op.row);
         if (error) throw error;
         queue = queue.slice(1);
         saveQueue(userId, queue);
@@ -1054,11 +1066,19 @@ export default function PlantoesApp() {
       }
     }
     if (queue.length === 0) {
-      const { data, error } = await supabase.from(TABLE).select("*");
-      if (!error && data) {
-        const next = rowsToEntries(data);
+      const [entriesRes, lembretesRes] = await Promise.all([
+        supabase.from(TABLE).select("*"),
+        supabase.from(LEMBRETES_TABLE).select("*"),
+      ]);
+      if (!entriesRes.error && entriesRes.data) {
+        const next = rowsToEntries(entriesRes.data);
         setEntries(next);
         saveCache(userId, next);
+      }
+      if (!lembretesRes.error && lembretesRes.data) {
+        const next = lembretesToDict(lembretesRes.data);
+        setLembretes(next);
+        saveLembretesCache(userId, next);
       }
       showToast("Sincronizado", "success");
     }
@@ -1236,19 +1256,21 @@ export default function PlantoesApp() {
       const trimmed = texto.trim();
       if (!trimmed || !dayKey) return;
       const id = crypto.randomUUID();
-      setLembretes((prev) => ({
-        ...prev,
-        [dayKey]: [...(prev[dayKey] || []), { id, texto: trimmed, feito: false, subitens: [] }],
-      }));
-      const { error } = await supabase
-        .from(LEMBRETES_TABLE)
-        .insert({ id, user_id: userId, data: dayKey, texto: trimmed, feito: false, subitens: [] });
-      if (error) {
+      const novo = { id, texto: trimmed, feito: false, subitens: [] };
+      setLembretes((prev) => ({ ...prev, [dayKey]: [...(prev[dayKey] || []), novo] }));
+      const row = lembreteToRow(dayKey, novo, userId);
+      const outcome = await runOrQueue(
+        () => supabase.from(LEMBRETES_TABLE).insert(row),
+        { kind: "upsert", table: LEMBRETES_TABLE, row }
+      );
+      if (outcome.status === "error") {
         setLembretes((prev) => ({ ...prev, [dayKey]: (prev[dayKey] || []).filter((l) => l.id !== id) }));
         showToast("Não foi possível salvar o lembrete", "error");
+      } else if (outcome.status === "queued") {
+        showToast("Lembrete salvo offline — sincroniza quando reconectar", "success");
       }
     },
-    [userId, showToast]
+    [userId, showToast, runOrQueue]
   );
 
   const toggleLembreteFeito = useCallback(
@@ -1260,19 +1282,25 @@ export default function PlantoesApp() {
         ...prev,
         [dayKey]: (prev[dayKey] || []).map((l) => (l.id === id ? { ...l, feito: nextFeito } : l)),
       }));
-      const { error } = await supabase.from(LEMBRETES_TABLE).update({ feito: nextFeito }).eq("id", id);
-      if (error) showToast("Não foi possível atualizar o lembrete", "error");
+      const outcome = await runOrQueue(
+        () => supabase.from(LEMBRETES_TABLE).update({ feito: nextFeito }).eq("id", id),
+        { kind: "upsert", table: LEMBRETES_TABLE, row: lembreteToRow(dayKey, { ...current, feito: nextFeito }, userId) }
+      );
+      if (outcome.status === "error") showToast("Não foi possível atualizar o lembrete", "error");
     },
-    [lembretes, showToast, userId]
+    [lembretes, showToast, userId, runOrQueue]
   );
 
   const deleteLembrete = useCallback(
     async (dayKey, id) => {
       setLembretes((prev) => ({ ...prev, [dayKey]: (prev[dayKey] || []).filter((l) => l.id !== id) }));
-      const { error } = await supabase.from(LEMBRETES_TABLE).delete().eq("id", id);
-      if (error) showToast("Não foi possível excluir o lembrete", "error");
+      const outcome = await runOrQueue(
+        () => supabase.from(LEMBRETES_TABLE).delete().eq("id", id),
+        { kind: "delete", table: LEMBRETES_TABLE, row: { id } }
+      );
+      if (outcome.status === "error") showToast("Não foi possível excluir o lembrete", "error");
     },
-    [showToast, userId]
+    [showToast, runOrQueue]
   );
 
   const addSubitem = useCallback(
@@ -1286,10 +1314,13 @@ export default function PlantoesApp() {
         ...prev,
         [dayKey]: (prev[dayKey] || []).map((l) => (l.id === lembreteId ? { ...l, subitens: nextSubitens } : l)),
       }));
-      const { error } = await supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId);
-      if (error) showToast("Não foi possível salvar o subtópico", "error");
+      const outcome = await runOrQueue(
+        () => supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId),
+        { kind: "upsert", table: LEMBRETES_TABLE, row: lembreteToRow(dayKey, { ...parent, subitens: nextSubitens }, userId) }
+      );
+      if (outcome.status === "error") showToast("Não foi possível salvar o subtópico", "error");
     },
-    [lembretes, showToast]
+    [lembretes, showToast, userId, runOrQueue]
   );
 
   const toggleSubitemFeito = useCallback(
@@ -1301,10 +1332,13 @@ export default function PlantoesApp() {
         ...prev,
         [dayKey]: (prev[dayKey] || []).map((l) => (l.id === lembreteId ? { ...l, subitens: nextSubitens } : l)),
       }));
-      const { error } = await supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId);
-      if (error) showToast("Não foi possível atualizar o subtópico", "error");
+      const outcome = await runOrQueue(
+        () => supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId),
+        { kind: "upsert", table: LEMBRETES_TABLE, row: lembreteToRow(dayKey, { ...parent, subitens: nextSubitens }, userId) }
+      );
+      if (outcome.status === "error") showToast("Não foi possível atualizar o subtópico", "error");
     },
-    [lembretes, showToast]
+    [lembretes, showToast, userId, runOrQueue]
   );
 
   const deleteSubitem = useCallback(
@@ -1316,10 +1350,13 @@ export default function PlantoesApp() {
         ...prev,
         [dayKey]: (prev[dayKey] || []).map((l) => (l.id === lembreteId ? { ...l, subitens: nextSubitens } : l)),
       }));
-      const { error } = await supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId);
-      if (error) showToast("Não foi possível excluir o subtópico", "error");
+      const outcome = await runOrQueue(
+        () => supabase.from(LEMBRETES_TABLE).update({ subitens: nextSubitens }).eq("id", lembreteId),
+        { kind: "upsert", table: LEMBRETES_TABLE, row: lembreteToRow(dayKey, { ...parent, subitens: nextSubitens }, userId) }
+      );
+      if (outcome.status === "error") showToast("Não foi possível excluir o subtópico", "error");
     },
-    [lembretes, showToast]
+    [lembretes, showToast, userId, runOrQueue]
   );
 
   const changeLembreteData = useCallback(
@@ -1334,8 +1371,11 @@ export default function PlantoesApp() {
         next[newDayKey] = [...(next[newDayKey] || []), item];
         return next;
       });
-      const { error } = await supabase.from(LEMBRETES_TABLE).update({ data: newDayKey }).eq("id", id);
-      if (error) {
+      const outcome = await runOrQueue(
+        () => supabase.from(LEMBRETES_TABLE).update({ data: newDayKey }).eq("id", id),
+        { kind: "upsert", table: LEMBRETES_TABLE, row: lembreteToRow(newDayKey, item, userId) }
+      );
+      if (outcome.status === "error") {
         setLembretes((prev) => {
           const next = { ...prev };
           next[newDayKey] = (next[newDayKey] || []).filter((l) => l.id !== id);
@@ -1346,7 +1386,7 @@ export default function PlantoesApp() {
         showToast("Não foi possível alterar a data do lembrete", "error");
       }
     },
-    [lembretes, showToast]
+    [lembretes, showToast, runOrQueue, userId]
   );
 
   const lembretesPendentesCount = useMemo(
