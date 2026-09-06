@@ -34,6 +34,7 @@ import {
   EyeOff,
   Bell,
   ChevronDown,
+  Download,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 import LembretesTab from "./LembretesTab";
@@ -1103,6 +1104,62 @@ export default function PlantoesApp() {
       window.removeEventListener("offline", handleOffline);
     };
   }, [flushOfflineQueue, showToast, userId]);
+
+  // "Instalar app": um app instalado (tela inicial) guarda os arquivos e os dados
+  // offline de forma muito mais confiável do que uma aba/atalho comum do navegador.
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [showIosInstallHint, setShowIosInstallHint] = useState(false);
+
+  useEffect(() => {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    setIsStandalone(standalone);
+    if (standalone) return;
+
+    function handleBeforeInstallPrompt(evt) {
+      evt.preventDefault();
+      setInstallPrompt(evt);
+    }
+    function handleAppInstalled() {
+      setInstallPrompt(null);
+      setIsStandalone(true);
+    }
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+    if (isIos) {
+      try {
+        if (localStorage.getItem("plantoes-ios-install-hint-dismissed") !== "1") {
+          setShowIosInstallHint(true);
+        }
+      } catch {
+        setShowIosInstallHint(true);
+      }
+    }
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = useCallback(async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  }, [installPrompt]);
+
+  const dismissIosInstallHint = useCallback(() => {
+    setShowIosInstallHint(false);
+    try {
+      localStorage.setItem("plantoes-ios-install-hint-dismissed", "1");
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // Salva uma cópia local sempre que os registros mudam (depois do carregamento
   // inicial), para o app conseguir abrir com os últimos dados mesmo sem internet.
@@ -2466,6 +2523,17 @@ export default function PlantoesApp() {
           {saveError && (
             <div style={styles.saveWarning}>não foi possível salvar</div>
           )}
+          {installPrompt && (
+            <button
+              className="btn-lift"
+              style={styles.installBtn}
+              onClick={handleInstallClick}
+              title="Instalar o app para funcionar melhor offline"
+            >
+              <Download size={13} />
+              instalar app
+            </button>
+          )}
           <button
             className="btn-lift"
             style={styles.hideValuesBtn}
@@ -2484,6 +2552,24 @@ export default function PlantoesApp() {
             sair
           </button>
         </div>
+
+        {showIosInstallHint && (
+          <div style={styles.iosInstallHint}>
+            <span>
+              Pra funcionar melhor sem internet: toque em <strong>Compartilhar</strong> e depois em{" "}
+              <strong>Adicionar à Tela de Início</strong>.
+            </span>
+            <button
+              type="button"
+              className="btn-icon"
+              style={styles.iosInstallHintClose}
+              onClick={dismissIosInstallHint}
+              aria-label="Fechar dica"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
 
         <div style={styles.tabRow}>
           <button
@@ -5258,6 +5344,39 @@ export const styles = {
     borderRadius: 8,
     cursor: "pointer",
     color: "#5B6B75",
+  },
+  installBtn: {
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    border: "1px solid #2D6E6E",
+    background: "#E4F0EF",
+    borderRadius: 8,
+    padding: "6px 10px",
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: "pointer",
+    color: "#215454",
+  },
+  iosInstallHint: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    background: "#E4F0EF",
+    border: "1px solid #C9E0DE",
+    borderRadius: 8,
+    padding: "8px 12px",
+    fontSize: 12,
+    color: "#215454",
+    marginBottom: 12,
+  },
+  iosInstallHintClose: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    marginLeft: "auto",
+    color: "#215454",
   },
   weekHeader: {
     display: "grid",
