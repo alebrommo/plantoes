@@ -1545,6 +1545,50 @@ export default function PlantoesApp() {
     };
   }, [entries, cursor]);
 
+  // Mesma soma de monthTotals, mas só do dia exibido — usada na visão "diário".
+  const dayTotals = useMemo(() => {
+    let plantaoSum = 0,
+      plantaoCount = 0,
+      remocaoSum = 0,
+      remocaoCount = 0,
+      eventoSum = 0,
+      eventoCount = 0,
+      paidSum = 0,
+      pendingSum = 0;
+    const items = [];
+    (entries[activeDay] || []).forEach((e) => {
+      const v = Number(e.value) || 0;
+      if (e.type === "plantao") {
+        plantaoSum += v;
+        plantaoCount += 1;
+      } else if (e.type === "evento") {
+        eventoSum += v;
+        eventoCount += 1;
+      } else {
+        remocaoSum += v;
+        remocaoCount += 1;
+      }
+      if (e.pago) paidSum += v;
+      else pendingSum += v;
+      items.push({ dayKey: activeDay, ...e });
+    });
+    return {
+      plantaoSum,
+      plantaoCount,
+      remocaoSum,
+      remocaoCount,
+      eventoSum,
+      eventoCount,
+      paidSum,
+      pendingSum,
+      total: plantaoSum + remocaoSum + eventoSum,
+      items,
+    };
+  }, [entries, activeDay]);
+
+  const displayTotals = calendarView === "dia" ? dayTotals : monthTotals;
+  const totalsScopeLabel = calendarView === "dia" ? "dia" : "mês";
+
   const computePrintData = useCallback(
     (range) => {
       const { start, end, title } = range;
@@ -3013,8 +3057,8 @@ export default function PlantoesApp() {
                   hideValues={hideValues}
             icon={<Stethoscope size={14} />}
             label="plantões"
-            count={monthTotals.plantaoCount}
-            value={monthTotals.plantaoSum}
+            count={displayTotals.plantaoCount}
+            value={displayTotals.plantaoSum}
             color="#2D6E6E"
             bg="#E4F0EF"
             active={expandedSummaryKey === "plantao"}
@@ -3024,8 +3068,8 @@ export default function PlantoesApp() {
                   hideValues={hideValues}
             icon={<Truck size={14} />}
             label="remoções"
-            count={monthTotals.remocaoCount}
-            value={monthTotals.remocaoSum}
+            count={displayTotals.remocaoCount}
+            value={displayTotals.remocaoSum}
             color="#B5541F"
             bg="#F5E6DC"
             active={expandedSummaryKey === "remocao"}
@@ -3035,16 +3079,16 @@ export default function PlantoesApp() {
                   hideValues={hideValues}
             icon={<Presentation size={14} />}
             label="eventos"
-            count={monthTotals.eventoCount}
-            value={monthTotals.eventoSum}
+            count={displayTotals.eventoCount}
+            value={displayTotals.eventoSum}
             color="#1F4278"
             bg="#E3EAF6"
             active={expandedSummaryKey === "evento"}
             onClick={() => setExpandedSummaryKey((k) => (k === "evento" ? null : "evento"))}
           />
           <div style={styles.totalChip}>
-            <div style={styles.totalLabel}>total do mês</div>
-            <div style={styles.totalValue}>{fmtValue(monthTotals.total)}</div>
+            <div style={styles.totalLabel}>total do {totalsScopeLabel}</div>
+            <div style={styles.totalValue}>{fmtValue(displayTotals.total)}</div>
           </div>
         </div>
 
@@ -3053,7 +3097,7 @@ export default function PlantoesApp() {
                   hideValues={hideValues}
             icon={<CheckCircle2 size={14} />}
             label="recebido"
-            value={monthTotals.paidSum}
+            value={displayTotals.paidSum}
             color="#206B3C"
             bg="#E2F2E7"
             active={expandedSummaryKey === "pago"}
@@ -3063,7 +3107,7 @@ export default function PlantoesApp() {
                   hideValues={hideValues}
             icon={<Circle size={14} />}
             label="a receber"
-            value={monthTotals.pendingSum}
+            value={displayTotals.pendingSum}
             color="#8C6D1B"
             bg="#F6EFDD"
             active={expandedSummaryKey === "pendente"}
@@ -3072,7 +3116,7 @@ export default function PlantoesApp() {
         </div>
 
         {expandedSummaryKey && (() => {
-          const filtered = monthTotals.items.filter((e) => {
+          const filtered = displayTotals.items.filter((e) => {
             if (expandedSummaryKey === "pago") return !!e.pago;
             if (expandedSummaryKey === "pendente") return !e.pago;
             return e.type === expandedSummaryKey;
@@ -3086,7 +3130,7 @@ export default function PlantoesApp() {
           }[expandedSummaryKey];
           return (
             <div style={styles.summaryExpandWrap}>
-              <p style={styles.statsSectionTitle}>{summaryLabel} do mês</p>
+              <p style={styles.statsSectionTitle}>{summaryLabel} do {totalsScopeLabel}</p>
               {filtered.length === 0 ? (
                 <div style={styles.dayPanelEmpty}>Nenhum registro nesse grupo.</div>
               ) : (
