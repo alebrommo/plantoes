@@ -90,6 +90,26 @@ function saveLembretesCache(uid, lembretes) {
   }
 }
 
+// navigator.onLine só diz se o aparelho está ligado a ALGUMA rede, não se essa
+// rede chega à internet de verdade — em vários celulares/redes ele erra e fica
+// "false" com a internet funcionando normalmente. Por isso, antes de acreditar
+// num "offline", confirma com uma requisição rápida de verdade pro próprio site.
+async function probeConnectivity() {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    await fetch(`/favicon.svg?_=${Date.now()}`, {
+      method: "HEAD",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Fila de alterações feitas offline, sincronizadas quando a conexão volta.
 function loadQueue(uid) {
   if (!uid) return [];
@@ -1201,6 +1221,15 @@ export default function PlantoesApp() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [pendingCount, setPendingCount] = useState(0);
 
+  // Confirma um "offline" inicial com uma requisição de verdade antes de
+  // acreditar no navigator.onLine (que erra em alguns aparelhos/redes).
+  useEffect(() => {
+    if (navigator.onLine) return;
+    probeConnectivity().then((reachable) => {
+      if (reachable) setIsOnline(true);
+    });
+  }, []);
+
   useEffect(() => {
     setPendingCount(loadQueue(userId).length);
   }, [userId]);
@@ -1214,14 +1243,12 @@ export default function PlantoesApp() {
     [userId]
   );
 
-  // Tenta a operação no Supabase; se não houver internet ou a rede falhar,
-  // guarda na fila offline em vez de mostrar erro.
+  // Tenta a operação no Supabase; só guarda na fila offline se a tentativa real
+  // falhar. Não confia em navigator.onLine pra decidir de antemão — esse sinal do
+  // navegador é conhecido por errar (fica "false" mesmo com internet normal em
+  // alguns aparelhos/redes), então a forma confiável é sempre tentar primeiro.
   const runOrQueue = useCallback(
     async (onlineOp, queueOp) => {
-      if (!navigator.onLine) {
-        enqueueOffline(queueOp);
-        return { status: "queued" };
-      }
       try {
         const { error } = await onlineOp();
         if (error) return { status: "error", error };
@@ -1323,9 +1350,10 @@ export default function PlantoesApp() {
   }, [userId]);
 
   // Também tenta enviar fotos pendentes ao abrir o app (caso tenha fechado
-  // offline com fotos na fila e reaberto já conectado).
+  // offline com fotos na fila). flushPendingPhotos já falha em silêncio se não
+  // houver conexão de verdade, então não há necessidade de checar antes.
   useEffect(() => {
-    if (userId && navigator.onLine) flushPendingPhotos();
+    if (userId) flushPendingPhotos();
   }, [userId, flushPendingPhotos]);
 
   useEffect(() => {
@@ -1337,7 +1365,10 @@ export default function PlantoesApp() {
       }
       flushPendingPhotos();
     }
-    function handleOffline() {
+    async function handleOffline() {
+      // navigator.onLine erra às vezes — confirma antes de avisar o usuário.
+      const reachable = await probeConnectivity();
+      if (reachable) return;
       setIsOnline(false);
       showToast("Sem conexão — as alterações serão salvas localmente", "error");
     }
@@ -1433,7 +1464,6 @@ export default function PlantoesApp() {
 
     (async () => {
       try {
-        if (!navigator.onLine) throw new Error("offline");
         const { data, error } = await supabase.from(TABLE).select("*");
         if (cancelled) return;
         if (error) throw error;
@@ -1504,7 +1534,6 @@ export default function PlantoesApp() {
 
     (async () => {
       try {
-        if (!navigator.onLine) throw new Error("offline");
         const { data, error } = await supabase.from(LEMBRETES_TABLE).select("*");
         if (cancelled) return;
         if (error) throw error;
@@ -2671,13 +2700,11 @@ export default function PlantoesApp() {
       try {
         const addedPaths = [];
         for (const file of files) {
-          if (navigator.onLine) {
-            try {
-              addedPaths.push(await uploadRemocaoFoto(userId, ownerId, file));
-              continue;
-            } catch {
-              // se falhar mesmo online (ex: queda no meio do envio), cai pra fila offline
-            }
+          try {
+            addedPaths.push(await uploadRemocaoFoto(userId, ownerId, file));
+            continue;
+          } catch {
+            // sem conexão de verdade (ou falha de rede no meio do envio) — cai pra fila offline
           }
           const pendingId = crypto.randomUUID();
           await queuePendingPhoto({
