@@ -2703,8 +2703,19 @@ export default function PlantoesApp() {
           try {
             addedPaths.push(await uploadRemocaoFoto(userId, ownerId, file));
             continue;
-          } catch {
-            // sem conexão de verdade (ou falha de rede no meio do envio) — cai pra fila offline
+          } catch (err) {
+            // Falha de rede de verdade (sem internet, caiu no meio do envio) lança um
+            // TypeError de fetch — só nesse caso vale guardar na fila offline. Qualquer
+            // outro erro (bucket/coluna não configurados no Supabase, permissão negada
+            // etc.) é um problema real mesmo com internet, então avisa em vez de
+            // esconder atrás de "sem conexão" e enfileirar pra sempre falhar de novo.
+            if (!(err instanceof TypeError)) {
+              showToast(
+                `Não foi possível enviar a foto (${err?.message || "erro desconhecido"}) — confira se o SQL de fotos foi configurado no Supabase`,
+                "error"
+              );
+              continue;
+            }
           }
           const pendingId = crypto.randomUUID();
           await queuePendingPhoto({
