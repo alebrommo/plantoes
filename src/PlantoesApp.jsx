@@ -35,6 +35,7 @@ import {
   Bell,
   ChevronDown,
   Download,
+  Camera,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 import LembretesTab from "./LembretesTab";
@@ -109,14 +110,20 @@ function saveQueue(uid, queue) {
   }
 }
 
-// Cada remoção de um plantão HAPVIDA guarda { valor, pago, obs } — normaliza também
-// o formato antigo (array de números, ou sem obs) salvo antes dessas mudanças.
+// Cada remoção de um plantão HAPVIDA guarda { id, valor, pago, obs, fotos } — normaliza
+// também o formato antigo (array de números, ou sem id/obs/fotos) salvo antes dessas mudanças.
 function normalizeRemocoes(remocoes) {
   if (!Array.isArray(remocoes)) return [];
   return remocoes.map((r) =>
     r && typeof r === "object"
-      ? { valor: Number(r.valor) || 0, pago: !!r.pago, obs: r.obs || "" }
-      : { valor: Number(r) || 0, pago: false, obs: "" }
+      ? {
+          id: r.id || crypto.randomUUID(),
+          valor: Number(r.valor) || 0,
+          pago: !!r.pago,
+          obs: r.obs || "",
+          fotos: Array.isArray(r.fotos) ? r.fotos : [],
+        }
+      : { id: crypto.randomUUID(), valor: Number(r) || 0, pago: false, obs: "", fotos: [] }
   );
 }
 
@@ -161,6 +168,7 @@ function rowToEntry(row) {
     paciente: row.paciente || "",
     origem: row.origem || "",
     destino: row.destino || "",
+    fotos: Array.isArray(row.fotos) ? row.fotos : [],
   };
 }
 
@@ -186,6 +194,7 @@ function entryToRow(dayKey, entry, userId) {
     origem: entry.origem ?? null,
     destino: entry.destino ?? null,
     obs: entry.obs ?? null,
+    fotos: entry.fotos ?? [],
   };
 }
 
@@ -196,6 +205,88 @@ function rowsToEntries(rows) {
     (grouped[row.day_key] ||= []).push(entry);
   }
   return grouped;
+}
+
+// Fotos da evolução das remoções: arquivos em si ficam no Supabase Storage
+// (bucket privado), e cada registro só guarda o caminho do arquivo.
+const REMOCAO_FOTOS_BUCKET = "remocao-fotos";
+
+async function uploadRemocaoFoto(userId, ownerId, file) {
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+  const path = `${userId}/${ownerId}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await supabase.storage
+    .from(REMOCAO_FOTOS_BUCKET)
+    .upload(path, file, { contentType: file.type || "image/jpeg" });
+  if (error) throw error;
+  return path;
+}
+
+async function deleteRemocaoFoto(path) {
+  if (!path || path.startsWith("pending:")) return;
+  await supabase.storage.from(REMOCAO_FOTOS_BUCKET).remove([path]);
+}
+
+async function getRemocaoFotoUrl(path) {
+  const { data, error } = await supabase.storage.from(REMOCAO_FOTOS_BUCKET).createSignedUrl(path, 3600);
+  if (error) throw error;
+  return data.signedUrl;
+}
+
+// Fila offline de fotos: quando não há internet, a foto é guardada localmente
+// (IndexedDB, que lida bem com arquivos binários) e enviada ao Storage assim
+// que a conexão voltar — do mesmo jeito que os outros dados funcionam offline.
+const PHOTO_QUEUE_DB = "plantoes-photo-queue";
+const PHOTO_QUEUE_STORE = "pending";
+
+function openPhotoQueueDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(PHOTO_QUEUE_DB, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(PHOTO_QUEUE_STORE, { keyPath: "id" });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function queuePendingPhoto(record) {
+  const db = await openPhotoQueueDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_QUEUE_STORE, "readwrite");
+    tx.objectStore(PHOTO_QUEUE_STORE).put(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function listPendingPhotos(userId) {
+  const db = await openPhotoQueueDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_QUEUE_STORE, "readonly");
+    const req = tx.objectStore(PHOTO_QUEUE_STORE).getAll();
+    req.onsuccess = () => resolve((req.result || []).filter((r) => r.userId === userId));
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getPendingPhoto(id) {
+  const db = await openPhotoQueueDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_QUEUE_STORE, "readonly");
+    const req = tx.objectStore(PHOTO_QUEUE_STORE).get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function removePendingPhoto(id) {
+  const db = await openPhotoQueueDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PHOTO_QUEUE_STORE, "readwrite");
+    tx.objectStore(PHOTO_QUEUE_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // Subtópicos de um lembrete: checklist própria, guardada como jsonb na mesma linha.
@@ -252,6 +343,101 @@ const PALETTE = [
 const paletteFor = (id) => PALETTE.find((p) => p.id === id) || PALETTE[0];
 const defaultColorFor = (type) =>
   type === "plantao" ? "teal" : type === "evento" ? "azul" : "terracota";
+
+// Galeria de fotos da evolução de uma remoção: mostra miniaturas (buscando a URL
+// assinada de cada uma, já que o bucket é privado), permite adicionar e excluir.
+// Fotos ainda não enviadas (offline) usam o prefixo "pending:" e são mostradas a
+// partir do próprio arquivo local guardado na fila, com um selo "pendente".
+function FotoGallery({ fotos, uploading, onAdd, onRemove }) {
+  const [urlMap, setUrlMap] = useState({});
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fotos.forEach((path) => {
+      if (urlMap[path]) return;
+      if (path.startsWith("pending:")) {
+        const id = path.slice("pending:".length);
+        getPendingPhoto(id)
+          .then((rec) => {
+            if (!cancelled && rec) {
+              setUrlMap((m) => ({ ...m, [path]: URL.createObjectURL(rec.blob) }));
+            }
+          })
+          .catch(() => {});
+      } else {
+        getRemocaoFotoUrl(path)
+          .then((url) => {
+            if (!cancelled) setUrlMap((m) => ({ ...m, [path]: url }));
+          })
+          .catch(() => {});
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fotos]);
+
+  return (
+    <div style={styles.fotoGalleryGrid}>
+      {fotos.map((path) => {
+        const pending = path.startsWith("pending:");
+        return (
+          <div key={path} style={styles.fotoThumbWrap}>
+            {urlMap[path] ? (
+              pending ? (
+                <img src={urlMap[path]} style={styles.fotoThumb} alt="Foto da evolução (pendente de envio)" />
+              ) : (
+                <a href={urlMap[path]} target="_blank" rel="noreferrer">
+                  <img src={urlMap[path]} style={styles.fotoThumb} alt="Foto da evolução" />
+                </a>
+              )
+            ) : (
+              <div style={styles.fotoThumbLoading}>
+                <Loader2 size={14} className="spin" />
+              </div>
+            )}
+            {pending && <span style={styles.fotoPendingBadge}>pendente</span>}
+            <button
+              type="button"
+              className="btn-icon"
+              style={styles.fotoThumbDel}
+              onClick={() => onRemove(path)}
+              aria-label="Excluir foto"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        className="btn-lift"
+        style={styles.fotoAddBtn}
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading}
+        aria-label="Adicionar foto"
+        title="Adicionar foto"
+      >
+        {uploading ? <Loader2 size={16} className="spin" /> : <Camera size={16} />}
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const files = Array.from(e.target.files || []);
+          e.target.value = "";
+          if (files.length) onAdd(files);
+        }}
+      />
+    </div>
+  );
+}
 
 function ColorGrid({ options, value, onChange }) {
   return (
@@ -556,6 +742,7 @@ function buildReportHTML(data) {
 }
 
 const emptyForm = {
+  id: null,
   type: "plantao",
   value: "",
   local: "",
@@ -571,6 +758,7 @@ const emptyForm = {
   color: null,
   pago: false,
   remocoes: [],
+  fotos: [],
 };
 
 const PDF_PAGE_W = 595;
@@ -947,6 +1135,7 @@ export default function PlantoesApp() {
   const [form, setForm] = useState(emptyForm);
   const [duplicating, setDuplicating] = useState(false);
   const [duplicateTargetDay, setDuplicateTargetDay] = useState("");
+  const [fotoUploading, setFotoUploading] = useState(false);
 
   // Inject fonts once
   useEffect(() => {
@@ -1085,6 +1274,60 @@ export default function PlantoesApp() {
     }
   }, [showToast, userId]);
 
+  // Envia as fotos que ficaram pendentes (tiradas offline) assim que a conexão
+  // volta, e atualiza o registro (local e no Supabase) com o caminho definitivo.
+  const flushPendingPhotos = useCallback(async () => {
+    if (!userId) return;
+    let pending;
+    try {
+      pending = await listPendingPhotos(userId);
+    } catch {
+      return;
+    }
+    for (const p of pending) {
+      try {
+        const ownerId = p.remocaoId || p.entryId;
+        const path = await uploadRemocaoFoto(userId, ownerId, p.blob);
+        const pendingPath = `pending:${p.id}`;
+        let updatedEntry = null;
+        setEntries((prev) => {
+          const list = prev[p.dayKey];
+          if (!list) return prev;
+          const idx = list.findIndex((e) => e.id === p.entryId);
+          if (idx === -1) return prev;
+          const entry = list[idx];
+          if (p.remocaoId) {
+            updatedEntry = {
+              ...entry,
+              remocoes: (entry.remocoes || []).map((r) =>
+                r.id === p.remocaoId
+                  ? { ...r, fotos: [...(r.fotos || []).filter((x) => x !== pendingPath), path] }
+                  : r
+              ),
+            };
+          } else {
+            updatedEntry = { ...entry, fotos: [...(entry.fotos || []).filter((x) => x !== pendingPath), path] };
+          }
+          const nextList = [...list];
+          nextList[idx] = updatedEntry;
+          return { ...prev, [p.dayKey]: nextList };
+        });
+        if (updatedEntry) {
+          await supabase.from(TABLE).upsert(entryToRow(p.dayKey, updatedEntry, userId));
+        }
+        await removePendingPhoto(p.id);
+      } catch {
+        // continua tentando os próximos; essa fica na fila pra próxima reconexão
+      }
+    }
+  }, [userId]);
+
+  // Também tenta enviar fotos pendentes ao abrir o app (caso tenha fechado
+  // offline com fotos na fila e reaberto já conectado).
+  useEffect(() => {
+    if (userId && navigator.onLine) flushPendingPhotos();
+  }, [userId, flushPendingPhotos]);
+
   useEffect(() => {
     function handleOnline() {
       setIsOnline(true);
@@ -1092,6 +1335,7 @@ export default function PlantoesApp() {
         showToast("Conectado — sincronizando alterações…", "success");
         flushOfflineQueue();
       }
+      flushPendingPhotos();
     }
     function handleOffline() {
       setIsOnline(false);
@@ -1103,7 +1347,7 @@ export default function PlantoesApp() {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
     };
-  }, [flushOfflineQueue, showToast, userId]);
+  }, [flushOfflineQueue, flushPendingPhotos, showToast, userId]);
 
   // "Instalar app": um app instalado (tela inicial) guarda os arquivos e os dados
   // offline de forma muito mais confiável do que uma aba/atalho comum do navegador.
@@ -2173,7 +2417,9 @@ export default function PlantoesApp() {
   const openAddModal = (dayKey) => {
     setSelectedDay(dayKey);
     setEditingId(null);
-    setForm(emptyForm);
+    // Gera o id já na abertura (não só ao salvar), para as fotos da remoção
+    // terem uma pasta própria no Storage mesmo antes do registro ser salvo.
+    setForm({ ...emptyForm, id: crypto.randomUUID() });
     setDuplicating(false);
     setModalOpen(true);
   };
@@ -2187,7 +2433,14 @@ export default function PlantoesApp() {
       ...emptyForm,
       ...entry,
       value: String(entry.value - remocoesTotal),
-      remocoes: remocoes.map((r) => ({ valor: String(r.valor), pago: r.pago, obs: r.obs || "" })),
+      remocoes: remocoes.map((r) => ({
+        id: r.id,
+        valor: String(r.valor),
+        pago: r.pago,
+        obs: r.obs || "",
+        fotos: r.fotos || [],
+      })),
+      fotos: entry.fotos || [],
     });
     setDuplicating(false);
     setModalOpen(true);
@@ -2272,7 +2525,13 @@ export default function PlantoesApp() {
     const isHapvida = form.type === "plantao" && form.local.trim().toUpperCase().includes("HAPVIDA");
     const remocaoObjs = isHapvida
       ? form.remocoes
-          .map((r) => ({ valor: parseBRL(r.valor) || 0, pago: !!r.pago, obs: (r.obs || "").trim() }))
+          .map((r) => ({
+            id: r.id,
+            valor: parseBRL(r.valor) || 0,
+            pago: !!r.pago,
+            obs: (r.obs || "").trim(),
+            fotos: r.fotos || [],
+          }))
           .filter((r) => r.valor > 0)
       : [];
     const remocaoExtra = remocaoObjs.reduce((s, r) => s + r.valor, 0);
@@ -2295,7 +2554,7 @@ export default function PlantoesApp() {
     }
 
     const record = {
-      id: editingId || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      id: form.id || editingId || `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       type: form.type,
       value,
       color: form.color || defaultColorFor(form.type),
@@ -2328,6 +2587,7 @@ export default function PlantoesApp() {
             origem: form.origem,
             destino: form.destino,
             obs: form.obs,
+            fotos: form.fotos || [],
           }),
     };
 
@@ -2398,6 +2658,72 @@ export default function PlantoesApp() {
       });
     }
   };
+
+  // Adiciona fotos à galeria de uma remoção (avulsa ou dentro de um plantão
+  // HAPVIDA). Online, envia direto pro Storage; offline, guarda na fila local
+  // (IndexedDB) com um preview imediato e envia sozinho quando reconectar.
+  const handleAddFotos = useCallback(
+    async (files, scope, idx) => {
+      if (!files || files.length === 0) return;
+      const ownerId = scope === "entry" ? form.id : form.remocoes[idx]?.id;
+      if (!ownerId) return;
+      setFotoUploading(true);
+      try {
+        const addedPaths = [];
+        for (const file of files) {
+          if (navigator.onLine) {
+            try {
+              addedPaths.push(await uploadRemocaoFoto(userId, ownerId, file));
+              continue;
+            } catch {
+              // se falhar mesmo online (ex: queda no meio do envio), cai pra fila offline
+            }
+          }
+          const pendingId = crypto.randomUUID();
+          await queuePendingPhoto({
+            id: pendingId,
+            userId,
+            dayKey: selectedDay,
+            entryId: form.id,
+            remocaoId: scope === "remocao" ? form.remocoes[idx].id : null,
+            blob: file,
+            createdAt: Date.now(),
+          });
+          addedPaths.push(`pending:${pendingId}`);
+        }
+        setForm((f) => {
+          if (scope === "entry") return { ...f, fotos: [...(f.fotos || []), ...addedPaths] };
+          const next = [...f.remocoes];
+          next[idx] = { ...next[idx], fotos: [...(next[idx].fotos || []), ...addedPaths] };
+          return { ...f, remocoes: next };
+        });
+        if (addedPaths.some((p) => p.startsWith("pending:"))) {
+          showToast("Sem conexão — foto salva no aparelho e será enviada quando reconectar", "success");
+        }
+      } finally {
+        setFotoUploading(false);
+      }
+    },
+    [form.id, form.remocoes, userId, selectedDay, showToast]
+  );
+
+  const handleRemoveFoto = useCallback(async (path, scope, idx) => {
+    setForm((f) => {
+      if (scope === "entry") return { ...f, fotos: (f.fotos || []).filter((p) => p !== path) };
+      const next = [...f.remocoes];
+      next[idx] = { ...next[idx], fotos: (next[idx].fotos || []).filter((p) => p !== path) };
+      return { ...f, remocoes: next };
+    });
+    try {
+      if (path.startsWith("pending:")) {
+        await removePendingPhoto(path.slice("pending:".length));
+      } else {
+        await deleteRemocaoFoto(path);
+      }
+    } catch {
+      // melhor esforço — se sobrar um arquivo órfão no Storage não é grave
+    }
+  }, []);
 
   const handleDelete = async () => {
     if (!selectedDay || !editingId) return;
@@ -3858,7 +4184,7 @@ export default function PlantoesApp() {
                         <span>Remoções deste plantão (opcional)</span>
                       </div>
                       {form.remocoes.map((r, idx) => (
-                        <div key={idx} style={styles.remocaoGroup}>
+                        <div key={r.id} style={styles.remocaoGroup}>
                           <div style={styles.rowFields}>
                             <input
                               style={{ ...styles.input, fontFamily: "'IBM Plex Mono', monospace" }}
@@ -3919,6 +4245,15 @@ export default function PlantoesApp() {
                             }
                             placeholder="Informação sobre a remoção (opcional)"
                           />
+                          <div style={styles.fotoGalleryLabel}>
+                            <Camera size={12} /> fotos da evolução
+                          </div>
+                          <FotoGallery
+                            fotos={r.fotos || []}
+                            uploading={fotoUploading}
+                            onAdd={(files) => handleAddFotos(files, "remocao", idx)}
+                            onRemove={(path) => handleRemoveFoto(path, "remocao", idx)}
+                          />
                         </div>
                       ))}
                       <button
@@ -3928,7 +4263,7 @@ export default function PlantoesApp() {
                         onClick={() =>
                           setForm((f) => ({
                             ...f,
-                            remocoes: [...f.remocoes, { valor: "", pago: false, obs: "" }],
+                            remocoes: [...f.remocoes, { id: crypto.randomUUID(), valor: "", pago: false, obs: "", fotos: [] }],
                           }))
                         }
                       >
@@ -4032,6 +4367,15 @@ export default function PlantoesApp() {
                         placeholder="destino"
                       />
                     </div>
+                  </Field>
+
+                  <Field icon={<Camera size={14} />} label="Fotos da evolução (opcional)">
+                    <FotoGallery
+                      fotos={form.fotos || []}
+                      uploading={fotoUploading}
+                      onAdd={(files) => handleAddFotos(files, "entry")}
+                      onRemove={(path) => handleRemoveFoto(path, "entry")}
+                    />
                   </Field>
                 </>
               )}
@@ -6168,6 +6512,85 @@ export const styles = {
     padding: "6px 10px",
     fontSize: 12.5,
     cursor: "pointer",
+  },
+  fotoGalleryLabel: {
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    fontSize: 11,
+    color: "#8A8578",
+    marginTop: 2,
+  },
+  fotoGalleryGrid: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  fotoThumbWrap: {
+    position: "relative",
+    width: 56,
+    height: 56,
+    flexShrink: 0,
+  },
+  fotoThumb: {
+    width: 56,
+    height: 56,
+    objectFit: "cover",
+    borderRadius: 8,
+    border: "1px solid #E0DDD3",
+    display: "block",
+  },
+  fotoThumbLoading: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    border: "1px solid #E0DDD3",
+    background: "#F1EFE9",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#8A8578",
+  },
+  fotoThumbDel: {
+    position: "absolute",
+    top: -6,
+    right: -6,
+    width: 18,
+    height: 18,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "50%",
+    background: "#C0392B",
+    color: "#fff",
+    border: "2px solid #FCFBF8",
+    cursor: "pointer",
+  },
+  fotoPendingBadge: {
+    position: "absolute",
+    bottom: 2,
+    left: 2,
+    right: 2,
+    fontSize: 8,
+    fontWeight: 700,
+    textAlign: "center",
+    color: "#fff",
+    background: "rgba(140,109,27,0.85)",
+    borderRadius: 4,
+    padding: "1px 0",
+  },
+  fotoAddBtn: {
+    width: 56,
+    height: 56,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px dashed #B7BEC2",
+    borderRadius: 8,
+    background: "transparent",
+    color: "#5B6B75",
+    cursor: "pointer",
+    flexShrink: 0,
   },
   remocaoTotal: {
     fontSize: 12.5,
